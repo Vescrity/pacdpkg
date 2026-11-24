@@ -1,0 +1,13 @@
+usage:  pacdpkg <operation> [...]
+operations:
+    pacdpkg {-h --help}
+    pacdpkg {-V --version}
+    pacdpkg {-D --database} <options> <package(s)>
+    pacdpkg {-F --files}    [options] [file(s)]
+    pacdpkg {-Q --query}    [options] [package(s)]
+    pacdpkg {-R --remove}   [options] <package(s)>
+    pacdpkg {-S --sync}     [options] [package(s)]
+    pacdpkg {-T --deptest}  [options] [package(s)]
+    pacdpkg {-U --upgrade}  [options] <file(s)>
+
+use 'pacdpkg {-h --help}' with an operation for available options
