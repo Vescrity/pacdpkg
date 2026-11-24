@@ -98,6 +98,17 @@ Architecture = amd64  # auto 表示按本机
 
 命令行 `--color always|never|auto` 优先于配置。颜色码与 pacman 完全相同。
 
+## Shell 补全
+
+```
+completions/pacdpkg.bash   → /usr/share/bash-completion/completions/pacdpkg
+completions/_pacdpkg       → /usr/share/zsh/site-functions/_pacdpkg
+```
+
+`make install` 会一并安装。补全覆盖操作、每个操作的合法选项，以及目标：
+`-Q/-R/-D/-T` 补已安装包名，`-S` 补可用包名（带缓存，按 apt lists 的
+mtime 失效），`-Sl/-Si` 补仓库名，`-Qo/-U/-Qp` 补文件路径，`-Qg` 补组名。
+
 ## 数据来源
 
 本地库、安装原因、文件校验、候选版本、仓库地址、`.deb` 元数据全部直接读文件或归档

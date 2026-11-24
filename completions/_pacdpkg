@@ -1,0 +1,265 @@
+#compdef pacdpkg
+#
+# Install as /usr/share/zsh/site-functions/_pacdpkg
+
+_pacdpkg_available_names()
+{
+    local cache=${XDG_CACHE_HOME:-$HOME/.cache}/pacdpkg/avail-names
+    if [[ -s $cache ]] && ! find /var/lib/apt/lists -maxdepth 1 \
+        -name '*_Packages*' -newer "$cache" -print -quit 2>/dev/null | read -r; then
+        cat "$cache"
+        return
+    fi
+    mkdir -p "${cache:h}" 2>/dev/null
+    if pacdpkg -Slq 2>/dev/null | sort -u > "$cache.tmp.$$" && [[ -s $cache.tmp.$$ ]]; then
+        mv -f "$cache.tmp.$$" "$cache"
+    else
+        rm -f "$cache.tmp.$$"
+    fi
+    [[ -s $cache ]] && cat "$cache"
+}
+
+_pacdpkg_installed()
+{
+    local -a pkgs
+    pkgs=(${(f)"$(pacdpkg -Qq 2>/dev/null)"})
+    _wanted packages expl 'installed package' compadd -a pkgs
+}
+
+_pacdpkg_available()
+{
+    local -a pkgs
+    pkgs=(${(f)"$(_pacdpkg_available_names)"})
+    _wanted packages expl 'available package' compadd -a pkgs
+}
+
+_pacdpkg_repos()
+{
+    local -a repos
+    repos=(${(f)"$(pacdpkg -Sl 2>/dev/null | awk '{print $1}' | sort -u)"})
+    _wanted repos expl 'repository' compadd -a repos
+}
+
+_pacdpkg_groups()
+{
+    local -a groups
+    groups=(${(f)"$(pacdpkg -Qg 2>/dev/null | awk '{print $1}' | sort -u)"})
+    _wanted groups expl 'package group' compadd -a groups
+}
+
+_pacdpkg_common=(
+    '-b[set an alternate database location]:path:_files -/'
+    '--dbpath[set an alternate database location]:path:_files -/'
+    '-r[set an alternate installation root]:path:_files -/'
+    '--root[set an alternate installation root]:path:_files -/'
+    '--sysroot[operate on a mounted guest system]:path:_files -/'
+    '--arch[set an alternate architecture]:arch:(auto amd64 arm64 i386 x86_64 aarch64)'
+    '--cachedir[set an alternate package cache location]:dir:_files -/'
+    '--color[colorize the output]:when:(always never auto)'
+    '--config[set an alternate configuration file]:file:_files'
+    '--confirm[always ask for confirmation]'
+    '--debug[display debug messages]'
+    '--disable-download-timeout[use relaxed timeouts for download]'
+    '--disable-sandbox[disables all sandbox features]'
+    '--disable-sandbox-filesystem[disables the filesystem sandbox]'
+    '--disable-sandbox-syscalls[disables the syscall sandbox]'
+    '--gpgdir[set an alternate GnuPG home]:dir:_files -/'
+    '--hookdir[set an alternate hook location]:dir:_files -/'
+    '--logfile[set an alternate log file]:file:_files'
+    '--noconfirm[do not ask for any confirmation]'
+    '-v[be verbose]'
+    '--verbose[be verbose]'
+    '-h[show help]'
+    '--help[show help]'
+    '-V[show version]'
+    '--version[show version]'
+)
+
+_pacdpkg_trans=(
+    '--dbonly[only modify database entries]'
+    '--noscriptlet[do not execute install scriptlets]'
+    '--noprogressbar[do not show a progress bar]'
+    '--print-format[specify how targets are printed]:format:'
+    '--assume-installed[add a virtual package to satisfy dependencies]:package:'
+)
+
+_pacdpkg()
+{
+    local curcontext="$curcontext" state line
+    local -a args
+    typeset -A opt_args
+
+    _arguments -C $_pacdpkg_common \
+        '(-D --database)'{-D,--database}'[operate on the package database]' \
+        '(-F --files)'{-F,--files}'[query the files database]' \
+        '(-Q --query)'{-Q,--query}'[query the local package database]' \
+        '(-R --remove)'{-R,--remove}'[remove packages]' \
+        '(-S --sync)'{-S,--sync}'[synchronize packages]' \
+        '(-T --deptest)'{-T,--deptest}'[check dependencies]' \
+        '(-U --upgrade)'{-U,--upgrade}'[install local package files]' \
+        '*:: :->op'
+
+    [[ $state == op ]] || return 0
+
+    local op w
+    for w in ${words[2,$((CURRENT - 1))]}; do
+        case $w in
+            -D|--database) op=D ;;
+            -F|--files) op=F ;;
+            -Q|--query) op=Q ;;
+            -R|--remove) op=R ;;
+            -S|--sync) op=S ;;
+            -T|--deptest) op=T ;;
+            -U|--upgrade) op=U ;;
+            -[DFQRSTU]*)
+                case ${w#-} in
+                    *D*) op=D ;;
+                    *F*) op=F ;;
+                    *Q*) op=Q ;;
+                    *R*) op=R ;;
+                    *S*) op=S ;;
+                    *T*) op=T ;;
+                    *U*) op=U ;;
+                esac
+                ;;
+        esac
+    done
+    [[ -n $op ]] && _pacdpkg_op_$op
+}
+
+_pacdpkg_op_Q()
+{
+    _arguments $_pacdpkg_common \
+        '(-Q --query)'{-Q,--query}'[query the local package database]' \
+        '-c[view the changelog]' '--changelog[view the changelog]' \
+        '-d[list packages installed as dependencies]' '--deps[list packages installed as dependencies]' \
+        '-e[list explicitly installed packages]' '--explicit[list explicitly installed packages]' \
+        '-g[view members of a package group]' '--groups[view members of a package group]' \
+        '-i[view package information]' '--info[view package information]' \
+        '-k[check package files]' '--check[check package files]' \
+        '-l[list files owned by the package]' '--list[list files owned by the package]' \
+        '-m[list foreign packages]' '--foreign[list foreign packages]' \
+        '-n[list native packages]' '--native[list native packages]' \
+        '-o[query the package owning a file]' '--owns[query the package owning a file]:file:_files' \
+        '-p[query a package file]' '--file[query a package file]:package file:_files' \
+        '-q[show less information]' '--quiet[show less information]' \
+        '-s[search installed packages]' '--search[search installed packages]:regex:' \
+        '-t[list unrequired packages]' '--unrequired[list unrequired packages]' \
+        '-u[list outdated packages]' '--upgrades[list outdated packages]' \
+        '*:package:->target'
+    case $state in
+        target)
+            if (( ${words[(I)-p]} + ${words[(I)--file]} + ${words[(I)-o]} + ${words[(I)--owns]} )); then
+                _files
+            elif (( ${words[(I)-g]} + ${words[(I)--groups]} )); then
+                _pacdpkg_groups
+            else
+                _pacdpkg_installed
+            fi
+            ;;
+    esac
+}
+
+_pacdpkg_op_S()
+{
+    _arguments $_pacdpkg_common $_pacdpkg_trans \
+        '(-S --sync)'{-S,--sync}'[synchronize packages]' \
+        '-c[remove old packages from cache]' '--clean[remove old packages from cache]' \
+        '-d[skip dependency checks]' '--nodeps[skip dependency checks]' \
+        '-g[view package groups]' '--groups[view package groups]' \
+        '-i[view package information]' '--info[view package information]' \
+        '-l[view packages in a repository]' '--list[view packages in a repository]:repository:->repo' \
+        '-p[print the targets]' '--print[print the targets]' \
+        '-q[show less information]' '--quiet[show less information]' \
+        '-s[search remote repositories]' '--search[search remote repositories]:regex:' \
+        '-u[upgrade installed packages]' '--sysupgrade[upgrade installed packages]' \
+        '-w[download packages only]' '--downloadonly[download packages only]' \
+        '-y[refresh package databases]' '--refresh[refresh package databases]' \
+        '--asdeps[install as dependency]' '--asexplicit[install as explicit]' \
+        '--needed[do not reinstall up to date packages]' \
+        '--ignore[ignore a package upgrade]:package:->ignore' \
+        '--ignoregroup[ignore a group upgrade]:group:' \
+        '--overwrite[overwrite conflicting files]:glob:' \
+        '*:package:->target'
+    case $state in
+        repo) _pacdpkg_repos ;;
+        ignore) _pacdpkg_available ;;
+        target)
+            if (( ${words[(I)-l]} + ${words[(I)--list]} + ${words[(I)-i]} + ${words[(I)--info]} )); then
+                _pacdpkg_repos
+            else
+                _pacdpkg_available
+            fi
+            ;;
+    esac
+}
+
+_pacdpkg_op_R()
+{
+    _arguments $_pacdpkg_common $_pacdpkg_trans \
+        '(-R --remove)'{-R,--remove}'[remove packages]' \
+        '-c[remove packages and their dependents]' '--cascade[remove packages and their dependents]' \
+        '-d[skip dependency checks]' '--nodeps[skip dependency checks]' \
+        '-n[remove configuration files]' '--nosave[remove configuration files]' \
+        '-p[print the targets]' '--print[print the targets]' \
+        '-s[remove unnecessary dependencies]' '--recursive[remove unnecessary dependencies]' \
+        '-u[remove unneeded packages]' '--unneeded[remove unneeded packages]' \
+        '*:package:->target'
+    [[ $state == target ]] && _pacdpkg_installed
+}
+
+_pacdpkg_op_U()
+{
+    _arguments $_pacdpkg_common $_pacdpkg_trans \
+        '(-U --upgrade)'{-U,--upgrade}'[install local package files]' \
+        '-d[skip dependency checks]' '--nodeps[skip dependency checks]' \
+        '-p[print the targets]' '--print[print the targets]' \
+        '-w[download packages only]' '--downloadonly[download packages only]' \
+        '--asdeps[install as dependency]' '--asexplicit[install as explicit]' \
+        '--needed[do not reinstall up to date packages]' \
+        '--ignore[ignore a package upgrade]:package:' \
+        '--ignoregroup[ignore a group upgrade]:group:' \
+        '--overwrite[overwrite conflicting files]:glob:' \
+        '*:package file:_files -g "*.deb"'
+}
+
+_pacdpkg_op_D()
+{
+    _arguments $_pacdpkg_common \
+        '(-D --database)'{-D,--database}'[operate on the package database]' \
+        '-k[test the database for validity]' '--check[test the database for validity]' \
+        '-q[suppress success messages]' '--quiet[suppress success messages]' \
+        '--asdeps[mark packages as dependencies]' '--asexplicit[mark packages as explicit]' \
+        '*:package:->target'
+    [[ $state == target ]] && _pacdpkg_installed
+}
+
+_pacdpkg_op_F()
+{
+    _arguments $_pacdpkg_common $_pacdpkg_trans \
+        '(-F --files)'{-F,--files}'[query the files database]' \
+        '-l[list files owned by the package]' '--list[list files owned by the package]' \
+        '-q[show less information]' '--quiet[show less information]' \
+        '-x[use regular expressions]' '--regex[use regular expressions]' \
+        '-y[refresh the files database]' '--refresh[refresh the files database]' \
+        '--machinereadable[produce machine-readable output]' \
+        '*:file:->target'
+    case $state in
+        target)
+            if (( ${words[(I)-l]} + ${words[(I)--list]} )); then
+                _pacdpkg_available
+            else
+                _files
+            fi
+            ;;
+    esac
+}
+
+_pacdpkg_op_T()
+{
+    _arguments $_pacdpkg_common \
+        '(-T --deptest)'{-T,--deptest}'[check dependencies]' \
+        '*:dependency:_pacdpkg_installed'
+}
+
+_pacdpkg "$@"
