@@ -102,8 +102,11 @@ Architecture = amd64  # auto 表示按本机
 
 ```
 completions/pacdpkg.bash   → /usr/share/bash-completion/completions/pacdpkg
-completions/_pacdpkg       → /usr/share/zsh/site-functions/_pacdpkg
+completions/_pacdpkg       → /usr/share/zsh/vendor-completions/_pacdpkg
+                             /usr/local/share/zsh/site-functions/_pacdpkg
 ```
+
+zsh 需要 compinit 已初始化（`autoload -Uz compinit && compinit`），否则补全系统不会加载。
 
 `make install` 会一并安装。补全覆盖操作、每个操作的合法选项，以及目标：
 `-Q/-R/-D/-T` 补已安装包名，`-S` 补可用包名（带缓存，按 apt lists 的

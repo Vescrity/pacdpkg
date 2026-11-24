@@ -1,6 +1,8 @@
 BIN := pacdpkg
 PREFIX ?= /usr/local
 DATADIR ?= /usr/share
+ZSH_VENDOR ?= $(DATADIR)/zsh/vendor-completions
+ZSH_SITE ?= $(PREFIX)/share/zsh/site-functions
 GO ?= go
 
 .PHONY: all build test vet fmt install cross clean
@@ -22,7 +24,8 @@ fmt:
 install: build
 	install -Dm755 bin/$(BIN) $(DESTDIR)$(PREFIX)/bin/$(BIN)
 	install -Dm644 completions/pacdpkg.bash $(DESTDIR)$(DATADIR)/bash-completion/completions/$(BIN)
-	install -Dm644 completions/_pacdpkg $(DESTDIR)$(DATADIR)/zsh/site-functions/_$(BIN)
+	install -Dm644 completions/_pacdpkg $(DESTDIR)$(ZSH_VENDOR)/_$(BIN)
+	install -Dm644 completions/_pacdpkg $(DESTDIR)$(ZSH_SITE)/_$(BIN)
 
 cross:
 	@mkdir -p dist
