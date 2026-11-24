@@ -101,10 +101,12 @@ Architecture = amd64  # auto 表示按本机
 ## Shell 补全
 
 ```
-completions/pacdpkg.bash   → /usr/share/bash-completion/completions/pacdpkg
-completions/_pacdpkg       → /usr/share/zsh/vendor-completions/_pacdpkg
-                             /usr/local/share/zsh/site-functions/_pacdpkg
+completions/pacdpkg.bash   → $(PREFIX)/share/bash-completion/completions/pacdpkg
+completions/_pacdpkg       → $(PREFIX)/share/zsh/site-functions/_pacdpkg
 ```
+
+默认 `PREFIX=/usr/local`。打包成系统包时传
+`DATADIR=/usr/share ZSH_COMPDIR=/usr/share/zsh/vendor-completions`。
 
 zsh 需要 compinit 已初始化（`autoload -Uz compinit && compinit`），否则补全系统不会加载。
 
