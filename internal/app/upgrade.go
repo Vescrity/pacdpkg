@@ -23,6 +23,10 @@ func (a *App) upgrade() int {
 		return 1
 	}
 
+	if !a.cfg.Print {
+		fmt.Fprintln(os.Stdout, "loading packages...")
+	}
+
 	var targets []deb.InstallTarget
 	paths := make(map[string]string, len(a.targets))
 	seen := make(map[string]bool, len(a.targets))
@@ -41,14 +45,23 @@ func (a *App) upgrade() int {
 			continue
 		}
 		local := db.Get(name)
-		if a.cfg.Needed && local != nil && alpm.CompareVersion(local.Version, version) == 0 {
-			if !a.cfg.Print {
-				Warnf("%s-%s is up to date -- skipping", name, version)
+		if local != nil {
+			switch alpm.CompareVersion(local.Version, version) {
+			case 0:
+				if a.cfg.Needed {
+					if !a.cfg.Print {
+						Warnf("%s-%s is up to date -- skipping", local.Name, local.Version)
+					}
+					continue
+				}
+				if !a.cfg.Print && !a.cfg.DownloadOnly {
+					Warnf("%s-%s is up to date -- reinstalling", local.Name, local.Version)
+				}
+			case 1:
+				if !a.cfg.Print && !a.cfg.DownloadOnly {
+					Warnf("downgrading package %s (%s => %s)", local.Name, local.Version, version)
+				}
 			}
-			continue
-		}
-		if !a.cfg.Print && local != nil && alpm.CompareVersion(version, local.Version) < 0 {
-			Warnf("downgrading package %s (%s => %s)", name, local.Version, version)
 		}
 		seen[name] = true
 		targets = append(targets, deb.InstallTarget{
@@ -57,9 +70,6 @@ func (a *App) upgrade() int {
 		paths[name] = path
 	}
 
-	if !a.cfg.Print {
-		fmt.Fprintln(os.Stdout, "loading packages...")
-	}
 	if ret != 0 {
 		return 1
 	}

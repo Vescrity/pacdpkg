@@ -69,12 +69,23 @@ func (a *App) syncTransaction() int {
 			Errorf("target not found: %s", t)
 			return 1
 		}
-		if local := db.Get(name); a.cfg.Needed && local != nil &&
-			alpm.CompareVersion(local.Version, cand.Version) == 0 {
-			if !a.cfg.Print {
-				Warnf("%s-%s is up to date -- skipping", name, cand.Version)
+		if local := db.Get(name); local != nil {
+			switch alpm.CompareVersion(local.Version, cand.Version) {
+			case 0:
+				if a.cfg.Needed {
+					if !a.cfg.Print {
+						Warnf("%s-%s is up to date -- skipping", local.Name, local.Version)
+					}
+					continue
+				}
+				if !a.cfg.Print && !a.cfg.DownloadOnly {
+					Warnf("%s-%s is up to date -- reinstalling", local.Name, local.Version)
+				}
+			case 1:
+				if !a.cfg.Print && !a.cfg.DownloadOnly {
+					Warnf("downgrading package %s (%s => %s)", local.Name, local.Version, cand.Version)
+				}
 			}
-			continue
 		}
 		if a.ignored(name) || a.ignoredGroup(syncInfoPkg(cand)) {
 			if !render.Question(name+" is in IgnorePkg/IgnoreGroup. Install anyway?", true, a.cfg.NoConfirm) {
