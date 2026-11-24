@@ -2,6 +2,7 @@ package deb
 
 import (
 	"os"
+	"strings"
 
 	"pacdpkg/internal/alpm"
 )
@@ -110,6 +111,9 @@ func (db *DB) OwnersOf(path string) []*alpm.Pkg {
 			for _, f := range files {
 				key := trimDirSlash(f)
 				db.owners[key] = append(db.owners[key], p)
+				for _, twin := range usrMergeTwins(key) {
+					db.owners[twin] = append(db.owners[twin], p)
+				}
 			}
 		}
 	}
@@ -118,3 +122,24 @@ func (db *DB) OwnersOf(path string) []*alpm.Pkg {
 
 // DpkgVersion reports the installed dpkg version.
 func DpkgVersion() string { return dpkgVersion() }
+
+// usrMergeTwins returns the counterpart of a path under Debian's merged-/usr
+// layout. Packages may record /bin/foo while the file is reachable as
+// /usr/bin/foo, or the other way round.
+func usrMergeTwins(path string) []string {
+	pairs := [][2]string{
+		{"/bin/", "/usr/bin/"},
+		{"/sbin/", "/usr/sbin/"},
+		{"/lib/", "/usr/lib/"},
+		{"/lib64/", "/usr/lib64/"},
+	}
+	var out []string
+	for _, pair := range pairs {
+		if rest, ok := strings.CutPrefix(path, pair[0]); ok {
+			out = append(out, pair[1]+rest)
+		} else if rest, ok := strings.CutPrefix(path, pair[1]); ok {
+			out = append(out, pair[0]+rest)
+		}
+	}
+	return out
+}

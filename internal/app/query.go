@@ -159,6 +159,13 @@ func (a *App) queryOwns(db *deb.DB) int {
 		}
 		owners := db.OwnersOf(path)
 		if len(owners) == 0 {
+			if abs, err := filepath.Abs(t); err == nil && abs != path {
+				if st, err := os.Stat(abs); err != nil || !st.IsDir() {
+					owners = db.OwnersOf(abs)
+				}
+			}
+		}
+		if len(owners) == 0 {
 			Errorf("No package owns %s", path)
 			ret = 1
 			continue
