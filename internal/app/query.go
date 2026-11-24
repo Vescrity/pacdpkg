@@ -146,6 +146,12 @@ func (a *App) queryGroup(db *deb.DB) int {
 }
 
 func (a *App) queryOwns(db *deb.DB) int {
+	type target struct {
+		path    string
+		display string
+	}
+	var targets []target
+	var paths []string
 	ret := 0
 	for _, t := range a.targets {
 		if t == "" {
@@ -154,36 +160,53 @@ func (a *App) queryOwns(db *deb.DB) int {
 			continue
 		}
 		path := resolvePath(t)
+		display := path
 		if st, err := os.Stat(path); err == nil && st.IsDir() {
-			path = strings.TrimSuffix(path, "/") + "/"
+			display = strings.TrimSuffix(path, "/") + "/"
 		}
-		owners := db.OwnersOf(path)
-		if len(owners) == 0 {
-			if abs, err := filepath.Abs(t); err == nil && abs != path {
-				if st, err := os.Stat(abs); err != nil || !st.IsDir() {
-					owners = db.OwnersOf(abs)
+		targets = append(targets, target{path: path, display: display})
+		paths = append(paths, path)
+		if abs, err := filepath.Abs(t); err == nil && abs != path {
+			paths = append(paths, abs)
+		}
+	}
+	if len(targets) == 0 {
+		return ret
+	}
+
+	ownersByPath := db.OwnersOfAll(paths)
+	for _, tg := range targets {
+		seen := map[string]bool{}
+		var owners []*alpm.Pkg
+		addOwners := func(list []*alpm.Pkg) {
+			for _, p := range list {
+				if seen[p.Name] {
+					continue
 				}
+				seen[p.Name] = true
+				owners = append(owners, p)
 			}
 		}
+		addOwners(ownersByPath[tg.path])
+		if abs, err := filepath.Abs(tg.path); err == nil {
+			addOwners(ownersByPath[abs])
+		}
 		if len(owners) == 0 {
-			Errorf("No package owns %s", path)
+			Errorf("No package owns %s", tg.display)
 			ret = 1
 			continue
 		}
-		for _, owner := range owners {
-			p := owner
+		for _, p := range owners {
 			if a.cfg.Quiet {
 				fmt.Fprintln(os.Stdout, p.Name)
 			} else {
-				fmt.Fprintf(os.Stdout, "%s is owned by %s %s\n", path, p.Name, p.Version)
+				fmt.Fprintf(os.Stdout, "%s is owned by %s %s\n", tg.display, p.Name, p.Version)
 			}
 		}
 	}
 	return ret
 }
 
-// resolvePath mirrors pacman's lrealpath: resolve the directory part only,
-// so a symlink is reported as the path that was asked about.
 func resolvePath(p string) string {
 	if !strings.Contains(p, "/") {
 		lp, err := exec.LookPath(p)

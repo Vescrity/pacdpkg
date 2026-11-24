@@ -3,7 +3,6 @@ package deb
 import (
 	"bufio"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -195,8 +194,12 @@ func dpkgVersion() string {
 	return ""
 }
 
-// fileList returns the recorded file list of an installed package.
-func fileList(p *alpm.Pkg) ([]string, error) {
+// rawFileList returns the recorded file list of an installed package,
+// without touching the filesystem or sorting.
+func rawFileList(p *alpm.Pkg) ([]string, error) {
+	if p.RawFiles != nil {
+		return p.RawFiles, nil
+	}
 	data, err := os.ReadFile(infoPath(p.Binary, p.Name, ".list"))
 	if err != nil {
 		return nil, err
@@ -210,13 +213,25 @@ func fileList(p *alpm.Pkg) ([]string, error) {
 		if !strings.HasPrefix(line, "/") {
 			line = "/" + line
 		}
-		if st, err := os.Lstat(line); err == nil && st.IsDir() {
-			line = strings.TrimSuffix(line, "/") + "/"
-		}
 		files = append(files, line)
 	}
-	sort.Strings(files)
+	p.RawFiles = files
 	return files, nil
+}
+
+// listFiles returns the package indices in dpkg's info directory.
+func listFiles() []string {
+	entries, err := os.ReadDir(infoDir)
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".list") {
+			out = append(out, e.Name())
+		}
+	}
+	return out
 }
 
 // md5Sums parses the recorded md5sums of an installed package.

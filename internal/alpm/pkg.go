@@ -128,6 +128,7 @@ type Pkg struct {
 
 	Conffiles []Conffile
 	Files     []string
+	RawFiles  []string
 }
 
 type Conffile struct {

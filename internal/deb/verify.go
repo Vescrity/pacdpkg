@@ -1,8 +1,13 @@
 package deb
 
 import (
+	"bufio"
 	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
+	"sync"
 
 	"pacdpkg/internal/alpm"
 )
@@ -18,7 +23,7 @@ type VerifyResult struct {
 }
 
 func (db *DB) Verify(p *alpm.Pkg, full bool) (VerifyResult, error) {
-	files, err := db.Files(p)
+	files, err := rawFileList(p)
 	if err != nil {
 		return VerifyResult{}, err
 	}
@@ -97,27 +102,132 @@ func trimDirSlash(path string) string {
 	return path
 }
 
-// OwnersOf lists the packages whose recorded file list contains path.
-// The first call builds an index of every installed file.
-func (db *DB) OwnersOf(path string) []*alpm.Pkg {
-	path = trimDirSlash(path)
-	if db.owners == nil {
-		db.owners = map[string][]*alpm.Pkg{}
-		for _, p := range db.Pkgs {
-			files, err := db.Files(p)
-			if err != nil {
-				continue
+// OwnersOfAll reports which installed packages own any of the given paths.
+// Every path and its merged-/usr counterpart are matched in a single
+// streaming pass over dpkg's file lists.
+func (db *DB) OwnersOfAll(paths []string) map[string][]*alpm.Pkg {
+	type query struct {
+		path  string
+		names map[string]*alpm.Pkg
+	}
+	want := map[string][]*query{}
+
+	addCandidate := func(key, path string) {
+		key = normalizeOwnerPath(key)
+		if key == "" {
+			return
+		}
+		for _, q := range want[key] {
+			if q.path == path {
+				return
 			}
-			for _, f := range files {
-				key := trimDirSlash(f)
-				db.owners[key] = append(db.owners[key], p)
-				for _, twin := range usrMergeTwins(key) {
-					db.owners[twin] = append(db.owners[twin], p)
+		}
+		want[key] = append(want[key], &query{path: path, names: map[string]*alpm.Pkg{}})
+	}
+	for _, path := range paths {
+		addCandidate(path, path)
+		for _, twin := range usrMergeTwins(normalizeOwnerPath(path)) {
+			addCandidate(twin, path)
+		}
+	}
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	jobs := make(chan string)
+	workers := runtime.NumCPU()
+	if workers > 8 {
+		workers = 8
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for name := range jobs {
+				pkg := db.pkgForListFile(name)
+				if pkg == nil {
+					continue
+				}
+				f, err := os.Open(filepath.Join(infoDir, name))
+				if err != nil {
+					continue
+				}
+				sc := bufio.NewScanner(f)
+				sc.Buffer(make([]byte, 0, 1<<16), 1<<22)
+				for sc.Scan() {
+					line := strings.TrimSpace(sc.Text())
+					if line == "" || line == "/." {
+						continue
+					}
+					if !strings.HasPrefix(line, "/") {
+						line = "/" + line
+					}
+					queries := want[line]
+					if len(queries) == 0 {
+						continue
+					}
+					mu.Lock()
+					for _, q := range queries {
+						q.names[pkg.Name] = pkg
+					}
+					mu.Unlock()
+				}
+				f.Close()
+			}
+		}()
+	}
+	for _, name := range listFiles() {
+		jobs <- name
+	}
+	close(jobs)
+	wg.Wait()
+
+	out := make(map[string][]*alpm.Pkg, len(paths))
+	for _, path := range paths {
+		seen := map[string]bool{}
+		var owners []*alpm.Pkg
+		for _, queries := range want {
+			for _, q := range queries {
+				if q.path != path {
+					continue
+				}
+				for _, pkg := range q.names {
+					if seen[pkg.Name] {
+						continue
+					}
+					seen[pkg.Name] = true
+					owners = append(owners, pkg)
 				}
 			}
 		}
+		sort.Slice(owners, func(i, j int) bool { return owners[i].Name < owners[j].Name })
+		out[path] = owners
 	}
-	return db.owners[path]
+	return out
+}
+
+func (db *DB) pkgForListFile(name string) *alpm.Pkg {
+	name = strings.TrimSuffix(name, ".list")
+	if p := db.byName[name]; p != nil {
+		return p
+	}
+	if i := strings.IndexByte(name, ':'); i > 0 {
+		return db.byName[name[:i]]
+	}
+	return nil
+}
+
+func normalizeOwnerPath(path string) string {
+	path = trimDirSlash(path)
+	if path == "" {
+		return ""
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return path
 }
 
 // DpkgVersion reports the installed dpkg version.

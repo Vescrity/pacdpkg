@@ -23,7 +23,6 @@ type DB struct {
 	provided      map[string][]*alpm.Pkg
 	manual        map[string]bool
 	held          map[string]bool
-	owners        map[string][]*alpm.Pkg
 	reasonsLoaded bool
 	reasonOK      bool
 }
@@ -187,10 +186,18 @@ func (db *DB) Files(p *alpm.Pkg) ([]string, error) {
 	if p.Files != nil {
 		return p.Files, nil
 	}
-	files, err := fileList(p)
+	raw, err := rawFileList(p)
 	if err != nil {
 		return nil, err
 	}
+	files := make([]string, 0, len(raw))
+	for _, path := range raw {
+		if st, err := os.Lstat(path); err == nil && st.IsDir() {
+			path = strings.TrimSuffix(path, "/") + "/"
+		}
+		files = append(files, path)
+	}
+	sort.Strings(files)
 	p.Files = files
 	return files, nil
 }
