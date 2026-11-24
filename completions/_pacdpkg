@@ -681,7 +681,7 @@ _pacdpkg_key_longopts=(
 )
 
 _pacdpkg_key_options=(
-	'--config[Use an alternate config file (instead of /etc/pacman.conf)]: :_files'
+	'--config[Use an alternate config file (instead of /etc/pacdpkg.conf)]: :_files'
 	'--gpgdir[Set an alternate directory for GnuPG (instead of /etc/pacman.d/gnupg)]: :_files -/'
 	'--keyserver[Specify a keyserver to use if necessary]'
 )

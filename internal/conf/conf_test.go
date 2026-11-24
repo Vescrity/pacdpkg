@@ -6,22 +6,18 @@ import (
 	"testing"
 )
 
-func TestLoadMerged(t *testing.T) {
-	dir := t.TempDir()
-	a := filepath.Join(dir, "a.conf")
-	b := filepath.Join(dir, "b.conf")
-	if err := os.WriteFile(a, []byte("[options]\nVerbosePkgLists\nIgnorePkg = foo\nColor\n"), 0o644); err != nil {
+func TestLoad(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pacdpkg.conf")
+	body := "[options]\nVerbosePkgLists\nIgnorePkg = foo bar\nCacheDir = /tmp/cache\nColor\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(b, []byte("[options]\nIgnorePkg = bar\nCacheDir = /tmp/cache\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := LoadMerged(a, b)
+	cfg, err := Load(path, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !cfg.VerbosePkgLists {
-		t.Error("VerbosePkgLists lost")
+		t.Error("VerbosePkgLists not enabled")
 	}
 	if cfg.CacheDir != "/tmp/cache" {
 		t.Errorf("CacheDir = %q", cfg.CacheDir)

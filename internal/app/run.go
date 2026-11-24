@@ -130,7 +130,7 @@ func Run(argv []string) int {
 		}
 	} else {
 		confPath = "/etc/pacdpkg.conf"
-		cfgConf, err = conf.LoadMerged("/etc/pacman.conf", "/etc/pacdpkg.conf")
+		cfgConf, err = conf.Load(confPath, false)
 		if err != nil {
 			Errorf("could not read configuration: %s", errText(err))
 			return 1

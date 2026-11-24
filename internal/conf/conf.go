@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// Config holds the pacman.conf options that affect pacdpkg.
+// Config holds the configuration options that affect pacdpkg.
 type Config struct {
 	RootDir         string
 	DBPath          string
@@ -21,7 +21,7 @@ type Config struct {
 	Color           *bool
 }
 
-// Load reads a pacman.conf-style file. With required set, an unreadable
+// Load reads a pacman-style configuration file. With required set, an unreadable
 // file is an error (an explicit --config); otherwise defaults are used.
 func Load(path string, required bool) (*Config, error) {
 	cfg := &Config{}
@@ -78,42 +78,4 @@ func Load(path string, required bool) (*Config, error) {
 		}
 	}
 	return cfg, nil
-}
-
-// LoadMerged reads several configuration files in order; later files override
-// scalar settings while lists accumulate.
-func LoadMerged(paths ...string) (*Config, error) {
-	out := &Config{}
-	for _, path := range paths {
-		cfg, err := Load(path, false)
-		if err != nil {
-			return nil, err
-		}
-		merge(out, cfg)
-	}
-	return out, nil
-}
-
-func merge(dst, src *Config) {
-	if src.RootDir != "" {
-		dst.RootDir = src.RootDir
-	}
-	if src.DBPath != "" {
-		dst.DBPath = src.DBPath
-	}
-	if src.CacheDir != "" {
-		dst.CacheDir = src.CacheDir
-	}
-	if src.Architecture != "" {
-		dst.Architecture = src.Architecture
-	}
-	if src.Color != nil {
-		dst.Color = src.Color
-	}
-	dst.IgnorePkg = append(dst.IgnorePkg, src.IgnorePkg...)
-	dst.IgnoreGroup = append(dst.IgnoreGroup, src.IgnoreGroup...)
-	dst.HoldPkg = append(dst.HoldPkg, src.HoldPkg...)
-	dst.VerbosePkgLists = dst.VerbosePkgLists || src.VerbosePkgLists
-	dst.NoProgressBar = dst.NoProgressBar || src.NoProgressBar
-	dst.CheckSpace = dst.CheckSpace || src.CheckSpace
 }
