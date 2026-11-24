@@ -1,177 +1,249 @@
-# bash completion for pacdpkg
+# This file is in the public domain.
 #
-# Install as /usr/share/bash-completion/completions/pacdpkg
+# Adapted from pacman's contrib/bash_completion for pacdpkg.
 
-_pacdpkg_installed()
-{
-    pacdpkg -Qq 2>/dev/null
+_arch_compgen() {
+  local i r
+  COMPREPLY=($(compgen -W '$*' -- "$cur"))
+  for ((i=1; i < ${#COMP_WORDS[@]}-1; i++)); do
+    for r in ${!COMPREPLY[@]}; do
+      if [[ ${COMP_WORDS[i]} = ${COMPREPLY[r]} ]]; then
+        unset 'COMPREPLY[r]'; break
+      fi
+    done
+  done
 }
 
-_pacdpkg_repos()
-{
-    pacdpkg -Sl 2>/dev/null | awk '{print $1}' | sort -u
+_arch_ptr2comp() {
+  local list= x y
+  for x; do
+    for y in '0 --' '1 -'; do
+      eval 'set -- ${'$x'[${y% *}]}'
+      list+=\ ${@/#/${y#* }}
+    done
+  done
+  _arch_compgen $list
 }
 
-# Available package names are expensive to read from apt lists; cache them and
-# rebuild when any Packages index is newer.
-_pacdpkg_available()
-{
-    local cache dir tmp
-    cache="${XDG_CACHE_HOME:-$HOME/.cache}/pacdpkg/avail-names"
-    dir=/var/lib/apt/lists
+_arch_incomp() {
+  local r="[[:space:]]-(-${1#* }[[:space:]]|[[:alnum:]_]*${1% *})"; [[ $COMP_LINE =~ $r ]]
+}
 
-    if [[ -s $cache ]] && [[ -z $(find "$dir" -maxdepth 1 -name '*_Packages*' -newer "$cache" -print -quit 2>/dev/null) ]]; then
-        cat "$cache"
-        return
-    fi
-
-    mkdir -p "${cache%/*}" 2>/dev/null
-    tmp=$(mktemp "${cache}.XXXXXX" 2>/dev/null) || {
-        pacdpkg -Slq 2>/dev/null
-        return
+_pacdpkg_keyids() {
+  \pacman-key --list-keys 2>/dev/null | awk '
+    $1 == "pub" {
+      # key id
+      split($2, a, "/"); print a[2]
     }
-    pacdpkg -Slq 2>/dev/null | sort -u > "$tmp"
-    if [[ -s $tmp ]]; then
-        mv -f "$tmp" "$cache"
+    $1 == "uid" {
+      # email
+      if (match($NF, /<[^>]+>/))
+        print substr($NF, RSTART + 1, RLENGTH - 2)
+    }'
+}
+
+_pacdpkg_key() {
+  local o opts wantfiles
+  local cur prev words cword
+  _init_completion || return
+  opts=('add config delete edit-key export finger gpgdir
+         help import import-trustdb init keyserver list-keys list-sigs
+         lsign-key nocolor populate recv-keys refresh-keys updatedb
+         verify version'
+        'a d e f h l r u v V')
+
+  # operations for which we want to complete keyids
+  for o in 'd delete' 'e export' 'f finger' 'l list-keys' 'r recv-keys' \
+      'edit-key' 'list-sigs' 'lsign-key' 'refresh-keys'; do
+    _arch_incomp "$o" && break
+    unset o
+  done
+
+  # options for which we want file completion
+  wantfiles='-@(c|-config|g|-gpgdir)'
+
+  if [[ $prev = 'pacman-key' || ( $cur = -* && $prev != $wantfiles ) ]]; then
+    _arch_ptr2comp opts
+  elif [[ $prev = @(-k|--keyserver) ]]; then
+    return
+  elif [[ $prev != $wantfiles && $o ]]; then
+    COMPREPLY=($(compgen -W '$(_pacdpkg_keyids)' -- "$cur"))
+  fi
+  true
+}
+
+_makepkg() {
+  compopt +o default
+  local opts
+  local cur prev words cword
+  _init_completion || return
+  if [[ $prev = @(-p|--config) ]]; then
+    compopt -o default
+  elif [[ ! $prev =~ ^-(-(config|help|key|version)$|[[:alnum:]_]*[Vh]) ]]; then
+    opts=('allsource asdeps check clean cleanbuild config force geninteg help
+           holdver ignorearch install key log needed noarchive nobuild nocheck
+           nocolor noconfirm nodeps noextract noprepare noprogressbar nosign
+           packagelist printsrcinfo repackage rmdeps sign skipchecksums
+           skipinteg skippgpcheck source syncdeps verifysource version'
+          'A C L R S c d e f g h i m o p r s')
+    _arch_ptr2comp opts
+  fi
+  true
+}
+
+_pacdpkg_cache_file() {
+  printf '%s\n' "${XDG_CACHE_HOME:-$HOME/.cache}/pacdpkg/$1"
+}
+
+_pacdpkg_cache_fresh() {
+  local cache=$1
+  [[ -s $cache ]] && [[ -z $(find /var/lib/apt/lists -maxdepth 1 \
+    -name '*_Packages*' -newer "$cache" -print -quit 2>/dev/null) ]]
+}
+
+_pacdpkg_available_names() {
+  local cache tmp
+  cache=$(_pacdpkg_cache_file avail-names)
+  if _pacdpkg_cache_fresh "$cache"; then
+    cat "$cache"
+    return
+  fi
+  mkdir -p "${cache%/*}" 2>/dev/null
+  tmp=$(mktemp "${cache}.XXXXXX" 2>/dev/null) || {
+    \pacdpkg -Slq 2>/dev/null
+    return
+  }
+  \pacdpkg -Slq 2>/dev/null | sort -u > "$tmp"
+  if [[ -s $tmp ]]; then
+    mv -f "$tmp" "$cache"
+  else
+    rm -f "$tmp"
+  fi
+  [[ -s $cache ]] && cat "$cache"
+}
+
+_pacdpkg_group_names() {
+  local cache tmp
+  cache=$(_pacdpkg_cache_file groups)
+  if _pacdpkg_cache_fresh "$cache"; then
+    cat "$cache"
+    return
+  fi
+  mkdir -p "${cache%/*}" 2>/dev/null
+  tmp=$(mktemp "${cache}.XXXXXX" 2>/dev/null) || {
+    \pacdpkg -Sg 2>/dev/null | cut -d' ' -f1 | sort -u
+    return
+  }
+  \pacdpkg -Sg 2>/dev/null | cut -d' ' -f1 | sort -u > "$tmp"
+  if [[ -s $tmp ]]; then
+    mv -f "$tmp" "$cache"
+  else
+    rm -f "$tmp"
+  fi
+  [[ -s $cache ]] && cat "$cache"
+}
+
+_pacdpkg_repo_names() {
+  local cache tmp
+  cache=$(_pacdpkg_cache_file repos)
+  if _pacdpkg_cache_fresh "$cache"; then
+    cat "$cache"
+    return
+  fi
+  mkdir -p "${cache%/*}" 2>/dev/null
+  tmp=$(mktemp "${cache}.XXXXXX" 2>/dev/null) || {
+    \pacdpkg -Sl 2>/dev/null | cut -d' ' -f1 | sort -u
+    return
+  }
+  \pacdpkg -Sl 2>/dev/null | cut -d' ' -f1 | sort -u > "$tmp"
+  if [[ -s $tmp ]]; then
+    mv -f "$tmp" "$cache"
+  else
+    rm -f "$tmp"
+  fi
+  [[ -s $cache ]] && cat "$cache"
+}
+
+_pacdpkg_pkg() {
+  if [[ $1 == Slq ]]; then
+    _arch_compgen "$(_pacdpkg_available_names)"
+    return
+  fi
+  if [[ $1 == Sg ]]; then
+    _arch_compgen "$(_pacdpkg_group_names)"
+    return
+  fi
+  _arch_compgen "$(
+    if [[ $2 ]]; then
+      \pacdpkg -$1 2>/dev/null | \cut -d' ' -f1 | \sort -u
     else
-        rm -f "$tmp"
+      \pacdpkg -$1 2>/dev/null
     fi
-    [[ -s $cache ]] && cat "$cache"
+  )"
 }
 
-_pacdpkg_groups()
-{
-    pacdpkg -Qg 2>/dev/null | awk '{print $1}' | sort -u
+_pacdpkg_repo_list() {
+  _arch_compgen "$(_pacdpkg_repo_names)"
 }
 
-_pacdpkg_has()
-{
-    local i w
-    for ((i = 1; i < COMP_CWORD; i++)); do
-        w=${COMP_WORDS[i]}
-        [[ $w == "$1" ]] && return 0
-        # short options are often clustered, e.g. -Sl or -Qo
-        if [[ $1 == -[[:alpha:]] && $w == -[!-]* ]]; then
-            case ${w#-} in
-                *${1#-}*) return 0 ;;
-            esac
-        fi
-    done
-    return 1
+_pacdpkg() {
+  compopt -o default
+  local common core database files query remove sync upgrade o
+  local cur prev words cword
+  _init_completion || return
+  database=('asdeps asexplicit')
+  files=('list machinereadable refresh regex' 'l x y')
+  query=('changelog check deps explicit file foreign groups info list native owns
+          search unrequired upgrades' 'c e g i k l m n o p s t u')
+  remove=('cascade dbonly nodeps assume-installed nosave print recursive unneeded' 'c n p s u')
+  sync=('asdeps asexplicit clean dbonly downloadonly groups ignore ignoregroup
+         info list needed nodeps assume-installed print refresh recursive search sysupgrade'
+        'c g i l p s u w y')
+  upgrade=('asdeps asexplicit needed nodeps assume-installed print recursive' 'p')
+  common=('arch cachedir color config confirm dbpath debug gpgdir help hookdir logfile
+           noconfirm noprogressbar noscriptlet quiet root verbose' 'b d h q r v')
+  core=('database files help query remove sync upgrade version' 'D F Q R S U V h')
+
+  for o in 'D database' 'F files' 'Q query' 'R remove' 'S sync' 'U upgrade'; do
+    _arch_incomp "$o" && break
+  done
+
+  if [[ $? != 0 ]]; then
+    _arch_ptr2comp core
+  elif [[ ! $prev =~ ^-[[:alnum:]_]*[Vbhr] &&
+    ! $prev = --@(cachedir|color|config|dbpath|help|hookdir|gpgdir|logfile|root|version) ]]
+  then
+    [[ $cur = -* ]] && _arch_ptr2comp ${o#* } common ||
+      case ${o% *} in
+      D|R)
+          _pacdpkg_pkg Qq;;
+      F)
+        { _arch_incomp 'l list'   && _pacdpkg_pkg Slq ; }       ||
+          compopt +o default;;
+      Q)
+        { _arch_incomp 'g groups' && _pacdpkg_pkg Qg sort; }    ||
+        { _arch_incomp 'p file'   && _pacdpkg_file; }           ||
+        { _arch_incomp 's search' && compopt +o default; }     ||
+        { _arch_incomp 'u upgrades' && compopt +o default; }   ||
+          _arch_incomp 'o owns'   ||
+          _pacdpkg_pkg Qq;;
+      S)
+        { _arch_incomp 'g groups' && _pacdpkg_pkg Sg; }      ||
+        { _arch_incomp 'l list'   && _pacdpkg_repo_list; } ||
+        { _arch_incomp 's search' && compopt +o default; }  ||
+          _pacdpkg_pkg Slq;;
+      U)
+          _pacdpkg_file;;
+      esac
+  fi
+  true
 }
 
-_pacdpkg_opts_global="-b --dbpath -r --root --sysroot --arch --cachedir --color --config --confirm --debug --disable-download-timeout --disable-sandbox --disable-sandbox-filesystem --disable-sandbox-syscalls --gpgdir --hookdir --logfile --noconfirm -v --verbose -h --help -V --version"
-_pacdpkg_opts_trans="--dbonly --noscriptlet --noprogressbar --print-format --assume-installed"
-_pacdpkg_opts_q="-c --changelog -d --deps -e --explicit -g --groups -i --info -k --check -l --list -m --foreign -n --native -o --owns -p --file -q --quiet -s --search -t --unrequired -u --upgrades"
-_pacdpkg_opts_s="-c --clean -d --nodeps -g --groups -i --info -l --list -p --print -q --quiet -s --search -u --sysupgrade -w --downloadonly -y --refresh --asdeps --asexplicit --needed --ignore --ignoregroup --overwrite"
-_pacdpkg_opts_r="-c --cascade -d --nodeps -n --nosave -p --print -s --recursive -u --unneeded"
-_pacdpkg_opts_u="-d --nodeps -p --print -w --downloadonly --asdeps --asexplicit --needed --ignore --ignoregroup --overwrite"
-_pacdpkg_opts_d="-k --check -q --quiet --asdeps --asexplicit"
-_pacdpkg_opts_f="-l --list -q --quiet -x --regex -y --refresh --machinereadable"
-
-_pacdpkg()
-{
-    local cur prev op i w cluster
-    COMPREPLY=()
-    cur=${COMP_WORDS[COMP_CWORD]}
-    prev=${COMP_WORDS[COMP_CWORD-1]}
-    op=
-
-    for ((i = 1; i < COMP_CWORD; i++)); do
-        w=${COMP_WORDS[i]}
-        case $w in
-            -b|-r|--dbpath|--root|--sysroot|--config|--logfile|--gpgdir|--hookdir|--cachedir|--arch|--color|--ignore|--ignoregroup|--overwrite|--print-format|--assume-installed|--ask)
-                ((i++))
-                continue
-                ;;
-            -D|--database) op=D ;;
-            -F|--files) op=F ;;
-            -Q|--query) op=Q ;;
-            -R|--remove) op=R ;;
-            -S|--sync) op=S ;;
-            -T|--deptest) op=T ;;
-            -U|--upgrade) op=U ;;
-            -[DFQRSTU]*)
-                cluster=${w#-}
-                case $cluster in *D*) op=D ;; *F*) op=F ;; *Q*) op=Q ;; *R*) op=R ;; *S*) op=S ;; *T*) op=T ;; *U*) op=U ;; esac
-                ;;
-        esac
-    done
-
-    case $prev in
-        --color)
-            COMPREPLY=($(compgen -W "always never auto" -- "$cur"))
-            return
-            ;;
-        -b|--dbpath|-r|--root|--sysroot|--cachedir|--hookdir)
-            COMPREPLY=($(compgen -d -- "$cur"))
-            return
-            ;;
-        --config|--logfile|--gpgdir)
-            COMPREPLY=($(compgen -f -- "$cur"))
-            return
-            ;;
-        --arch)
-            COMPREPLY=($(compgen -W "auto amd64 arm64 i386 x86_64 aarch64" -- "$cur"))
-            return
-            ;;
-        --ignore|--ignoregroup|--overwrite|--print-format|--assume-installed|--ask)
-            return
-            ;;
-    esac
-
-    if [[ $cur == -* ]]; then
-        local opts="$_pacdpkg_opts_global"
-        case $op in
-            Q) opts="$opts $_pacdpkg_opts_q" ;;
-            S) opts="$opts $_pacdpkg_opts_s $_pacdpkg_opts_trans" ;;
-            R) opts="$opts $_pacdpkg_opts_r $_pacdpkg_opts_trans" ;;
-            U) opts="$opts $_pacdpkg_opts_u $_pacdpkg_opts_trans" ;;
-            D) opts="$opts $_pacdpkg_opts_d" ;;
-            F) opts="$opts $_pacdpkg_opts_f $_pacdpkg_opts_trans" ;;
-            T) opts="$opts" ;;
-            *)
-                opts="$opts -D --database -F --files -Q --query -R --remove -S --sync -T --deptest -U --upgrade"
-                ;;
-        esac
-        COMPREPLY=($(compgen -W "$opts" -- "$cur"))
-        return
-    fi
-
-    case $op in
-        Q)
-            if _pacdpkg_has -p || _pacdpkg_has --file || _pacdpkg_has -o || _pacdpkg_has --owns; then
-                COMPREPLY=($(compgen -f -- "$cur"))
-            elif _pacdpkg_has -g || _pacdpkg_has --groups; then
-                COMPREPLY=($(compgen -W "$(_pacdpkg_groups)" -- "$cur"))
-            else
-                COMPREPLY=($(compgen -W "$(_pacdpkg_installed)" -- "$cur"))
-            fi
-            ;;
-        S)
-            if _pacdpkg_has -l || _pacdpkg_has --list || _pacdpkg_has -i || _pacdpkg_has --info; then
-                COMPREPLY=($(compgen -W "$(_pacdpkg_repos)" -- "$cur"))
-            else
-                COMPREPLY=($(compgen -W "$(_pacdpkg_available)" -- "$cur"))
-            fi
-            ;;
-        R|D|T)
-            COMPREPLY=($(compgen -W "$(_pacdpkg_installed)" -- "$cur"))
-            ;;
-        U)
-            COMPREPLY=($(compgen -f -- "$cur"))
-            ;;
-        F)
-            if _pacdpkg_has -l || _pacdpkg_has --list; then
-                COMPREPLY=($(compgen -W "$(_pacdpkg_available)" -- "$cur"))
-            else
-                COMPREPLY=($(compgen -f -- "$cur"))
-            fi
-            ;;
-        *)
-            COMPREPLY=($(compgen -W "-D --database -F --files -Q --query -R --remove -S --sync -T --deptest -U --upgrade -h --help -V --version" -- "$cur"))
-            ;;
-    esac
+_pacdpkg_file() {
+  compopt -o filenames; _filedir 'pkg.tar*'
 }
 
 complete -F _pacdpkg pacdpkg
+complete -F _makepkg makepkg
+
+# ex:et ts=2 sw=2 ft=sh
