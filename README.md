@@ -1,151 +1,97 @@
 # pacdpkg
 
-pacman 7.1 的命令行接口，后端是 deb 系（dpkg/apt）。不是「能力表 + 透传」的
-wrapper：参数解析、输出排版、字段顺序、退出码都按真 pacman 实现，底层只借
-dpkg/apt 干活。
+在 Debian 系系统上提供 pacman 7.1 的命令行接口。参数解析、输出格式、字段顺序和退出码
+按 pacman 实现，包的安装和卸载交给 dpkg / apt。
 
-目标环境：Deepin / UOS / Debian / Ubuntu 等 deb 系系统；开发机上用真 pacman
-当 oracle 对拍。
+适用于 Deepin、UOS、Debian、Ubuntu 等发行版。
 
-## 现状
-
-pacman 7.1 的操作已全部覆盖：
-
-```
--Q -Qq -Qi -Qii -Ql -Qo -Qs -Qe -Qd -Qm -Qn -Qdt -Qdtt -Qu -Qk -Qkk -Qc -Qg -Qp
--S -Ss -Si -Sii -Sl -Sg -Sc -Scc -Sy -Syy -Su -Suu -Sw -Sp --print-format
--R -Rs -Rss -Rn -Rns -Rc -Ru -Rp
--U -Up --needed --downloadonly
--T  -D --asdeps --asexplicit -Dk -Dkk  -F -Fy -Fl -Fx -Fq --machinereadable
-```
-
-`-F` 基于 apt 的 Contents 索引（`pacdpkg -Fy` 构建），其余操作都直接映射到 dpkg/apt。
-
-> 注意：Deepin/UOS 的仓库不发布 `Contents-<arch>.gz`，在这些机器上 `-Fy` 会如实报
-> “failed to retrieve some files”，`-F` 查询会提示没有 files database。接入发布了
-> Contents 的 Debian/Ubuntu 源（或自己构建索引）后即可使用。
-
-`pacman.conf` 的 `VerbosePkgLists`、`IgnorePkg`、`IgnoreGroup`、`NoProgressBar`
-已支持，事务摘要会按 pacman 的两种排版输出（classic 列表 / 表格）。
-
-`-h/--help`（含每个操作各自的帮助）、`-V`、getopt_long 的全部行为（短选项簇、
-长选项前缀缩写、`--`、参数置换）与真机一致；**80 选项 × 7 操作的合法性
-矩阵与 pacman 7.1 560/560 一致**（见 `docs/matrix.md`）。
-
-## 构建
+## 构建与安装
 
 ```sh
-go build -o bin/pacdpkg ./cmd/pacdpkg     # 或 make build
-go test ./...                             # 或 make test
+make build      # bin/pacdpkg，静态链接，无运行时依赖
+make test
+make install    # 安装到 /usr/local，含补全脚本
+make cross      # dist/pacdpkg-linux-{amd64,arm64}
 ```
 
-默认静态构建（`CGO_ENABLED=0`），无运行时依赖；交叉编译到 deb 机器：
-
-```sh
-make cross            # 产出 dist/pacdpkg-linux-amd64
-scp dist/pacdpkg-linux-amd64 root@host:/usr/local/bin/pacdpkg
-```
+`make install` 支持 `PREFIX`、`DATADIR`、`BASH_COMPDIR`、`ZSH_COMPDIR`，
+打包时按发行版布局覆盖即可。
 
 ## 用法
 
-和 pacman 一样：
+命令和选项与 pacman 相同，`pacdpkg -h` 及各操作的 `-h` 可以看完整列表。
 
 ```sh
-pacdpkg -Q                    # 已安装包列表
-pacdpkg -Qi bash              # 包信息（-Qii 含 backup files）
-pacdpkg -Ql bash              # 包内文件
-pacdpkg -Qo /usr/bin/bash     # 文件属主
-pacdpkg -Qs '^bash$'          # 本地搜索（正则）
-pacdpkg -Qe                   # 显式安装（apt-mark manual）
-pacdpkg -Qd                   # 作为依赖安装（apt-mark auto）
-pacdpkg -Qdt                  # 孤儿依赖（-Qdtt 忽略 optdepends）
-pacdpkg -Qm                   # 仓库里不存在的包（foreign）
-pacdpkg -Qu                   # 可升级
-pacdpkg -Qk / -Qkk            # 文件缺失 / 属性校验
+pacdpkg -Q                    # 已安装的包
+pacdpkg -Qi bash              # 包信息，-Qii 附带配置文件
+pacdpkg -Ql bash              # 包内文件列表
+pacdpkg -Qo /bin/bash         # 文件属于哪个包
+pacdpkg -Qs bash              # 在本地库里搜索
+pacdpkg -Qdt                  # 不再被依赖的包
+pacdpkg -Qk / -Qkk            # 检查文件是否缺失、是否被改动
 pacdpkg -Qc bash              # changelog
-pacdpkg -Qp ./foo.deb         # 查询包文件
 
-pacdpkg -Ss '^bash$'          # 仓库搜索（含 [installed] 标记）
+pacdpkg -Ss bash              # 在仓库里搜索
 pacdpkg -Si bash              # 仓库包信息
-pacdpkg -S bash               # 安装（事务模拟 → 摘要 → 确认）
-pacdpkg -Su                   # 全系统升级
-pacdpkg -Sw bash              # 仅下载
-pacdpkg -Sp bash              # 打印下载地址
-pacdpkg -R bash               # 卸载（-Rs 连带依赖，-Rn 连配置）
-pacdpkg -U ./foo.deb          # 安装本地包
-pacdpkg -T bash>=5            # 依赖检查，未满足退出 127
-pacdpkg -D --asdeps bash      # 标记为依赖安装
-pacdpkg -Fy && pacdpkg -F bin/ls   # 文件数据库查询
+pacdpkg -S bash               # 安装，先给出事务摘要再确认
+pacdpkg -Su                   # 升级整个系统
+pacdpkg -Sw bash              # 只下载不安装
+pacdpkg -Rns bash             # 卸载，连依赖和配置文件一起清掉
+
+pacdpkg -U ./foo.deb          # 安装本地 deb
+pacdpkg -Fy                   # 下载 Contents 索引
+pacdpkg -F bin/ls             # 反查文件在哪个包里
 ```
 
-在 Arch 上也能跑 `-h`/`-V`/参数解析，但查询类命令需要 dpkg 数据库。
+大部分操作需要 root，查询类不需要。
 
 ## 配置
 
-按顺序读取 `/etc/pacman.conf` 和 `/etc/pacdpkg.conf`（后者覆盖前者；`--config`
-指定时只读该文件），使用 pacman 的 `[options]` 方言：
+配置文件是 `/etc/pacdpkg.conf`，用 `--config` 可以指定别的文件。支持这些
+`[options]` 项：
 
 ```
-[options]
-Color                 # tty 上启用彩色输出（与 pacman 的 --color 语义一致）
+Color                 # 在终端上启用颜色
 VerbosePkgLists       # 事务摘要用表格
 IgnorePkg = foo bar
 IgnoreGroup = grp
 HoldPkg = baz
 CacheDir = /var/cache/apt/archives
-Architecture = amd64  # auto 表示按本机
+Architecture = amd64  # auto 表示跟随本机
+NoProgressBar
 ```
 
-命令行 `--color always|never|auto` 优先于配置。颜色码与 pacman 完全相同。
+`--color always|never|auto` 优先于配置文件，颜色码与 pacman 一致。
 
 ## Shell 补全
 
 ```
-completions/pacdpkg.bash   → $(PREFIX)/share/bash-completion/completions/pacdpkg
-completions/_pacdpkg       → $(PREFIX)/share/zsh/site-functions/_pacdpkg
+completions/pacdpkg.bash   → $(DATADIR)/bash-completion/completions/pacdpkg
+completions/_pacdpkg       → $(ZSH_COMPDIR)/_pacdpkg
 ```
 
-默认 `PREFIX=/usr/local`。打包成系统包时传
-`DATADIR=/usr/share ZSH_COMPDIR=/usr/share/zsh/vendor-completions`。
+补全脚本改写自 pacman 自带的那份：操作和选项从同一张表里取，`-Q/-R/-D/-T`
+补已安装的包名，`-S` 补可用的包名（结果缓存在 `~/.cache/pacdpkg`，apt lists
+更新后失效），`-Sl/-Si` 补仓库名，`-Qg` 补组名。
 
-zsh 需要 compinit 已初始化（`autoload -Uz compinit && compinit`），否则补全系统不会加载。
+## 实现
 
-`make install` 会一并安装。补全覆盖操作、每个操作的合法选项，以及目标：
-`-Q/-R/-D/-T` 补已安装包名，`-S` 补可用包名（带缓存，按 apt lists 的
-mtime 失效），`-Sl/-Si` 补仓库名，`-Qo/-U/-Qp` 补文件路径，`-Qg` 补组名。
+包信息、安装原因、文件校验、候选版本、仓库地址和 `.deb` 元数据都直接从
+dpkg 与 apt 的数据文件或归档里读（`/var/lib/dpkg/status`、`/var/lib/dpkg/info`、
+`/var/lib/apt/extended_states`、`/var/lib/apt/lists`、`sources.list`、
+`preferences`、deb 的 ar/tar），不解析命令输出。
 
-## 数据来源
+事务由内置的求解器算出完整的安装、升级、卸载计划，确认后以 `pkg=version`
+的形式交给 `apt-get`，避免 apt 在两次计算之间选到别的版本。
 
-本地库、安装原因、文件校验、候选版本、仓库地址、`.deb` 元数据全部直接读文件或归档
-（`/var/lib/dpkg/status`、`/var/lib/dpkg/info`、`/var/lib/apt/extended_states`、
-`/var/lib/apt/lists`、`/etc/apt/sources.list*`、`/etc/apt/preferences*`、`.deb` 的
-ar/tar），不解析任何命令输出。事务计划由内置 resolver 计算，执行时用
-`pkg=version` 锁定，apt 只负责搬运与落盘。
+## 与 pacman 的差异
 
-## 一致性是怎么保证的
-
-1. **真机 oracle**：本机 pacman 7.1 只读命令 + `-Sp/--print-format` 无需 root，
-   输出、stderr、退出码直接对拍
-2. **源码对照**：字段排版、`humanize_size`、`dump_pkg_full` 的字段顺序、查询过滤
-   逻辑（`filter()`/`display()`）逐段照 `src/pacman/*.c` 实现
-3. **矩阵探测**：`docs/matrix.md` 里的 560 组合法性由脚本对真机探测生成，代码中的
-   选项表以此为输入
-4. **版本比较对拍**：`internal/alpm` 的 dpkg 版本比较有单测；机器上装有 dpkg 时，
-   `go test` 会随机生成 300 组版本号与 `dpkg --compare-versions` 交叉验证
-5. **deb 端集成**：在 Deepin 容器（root）上跑 `-Q` 全家，含本地 .deb 安装后的
-   foreign 判定、`apt-mark` 切换后的 reason 变化、目录属主查询等
-
-## 目录
-
-```
-cmd/pacdpkg         入口
-internal/cli        getopt_long 仿真、选项表、Config、帮助文本（内嵌真机输出）
-internal/alpm       Pkg/Dep 模型、dpkg 版本比较
-internal/deb        dpkg/apt 数据库读取、.deb 解析、依赖求解、Contents 索引
-internal/render     pacman 排版：字段、列表、大小、日期、搜索结果
-internal/app        操作分发与 -Q 实现
-docs/matrix.md      选项×操作矩阵与字段映射
-```
+- Debian 没有包组，`-Sg` / `-Qg` 用 apt 的 section 代替。
+- `-F` 依赖仓库发布的 Contents 索引。Deepin 和 UOS 的仓库不发布，`-Fy` 会逐个提示
+  这些仓库没有文件索引，`-F` 也就查不到结果。
+- Recommends 和 Suggests 映射成 optdepends，`-Qdtt` 据此判断孤儿包。
+- `-Qc` 读 `/usr/share/doc/<pkg>/changelog.Debian.gz`，没有时提示 changelog 不可用。
+- 只读取本机架构的包。
 
 ## 许可
 
