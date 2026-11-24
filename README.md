@@ -79,7 +79,7 @@ completions/_pacdpkg       → $(ZSH_COMPDIR)/_pacdpkg
 包信息、安装原因、文件校验、候选版本、仓库地址和 `.deb` 元数据都直接从
 dpkg 与 apt 的数据文件或归档里读（`/var/lib/dpkg/status`、`/var/lib/dpkg/info`、
 `/var/lib/apt/extended_states`、`/var/lib/apt/lists`、`sources.list`、
-`preferences`、deb 的 ar/tar），不解析命令输出。
+`preferences`、deb 的 ar/tar），压缩的仓库列表在进程内解压，不解析命令输出。
 
 事务由内置的求解器算出完整的安装、升级、卸载计划，确认后以 `pkg=version`
 的形式交给 `apt-get`，避免 apt 在两次计算之间选到别的版本。

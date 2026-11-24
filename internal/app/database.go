@@ -42,9 +42,8 @@ func (a *App) database() int {
 		if cfg.AsDeps {
 			mark = "auto"
 		}
-		if out, err := deb.Run("apt-mark", mark, t); err != nil {
+		if err := deb.Run("apt-mark", mark, t); err != nil {
 			Errorf("could not set install reason for package %s (%v)", t, err)
-			_ = out
 			ret = 1
 			continue
 		}

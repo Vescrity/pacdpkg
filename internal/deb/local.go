@@ -31,23 +31,22 @@ type DB struct {
 // global options (--cachedir, --arch).
 var ExtraArgs []string
 
-func Run(name string, args ...string) (string, error) {
+func Run(name string, args ...string) error {
 	if len(ExtraArgs) > 0 && strings.HasPrefix(filepath.Base(name), "apt") {
 		args = append(append([]string{}, ExtraArgs...), args...)
 	}
 	cmd := exec.Command(name, args...)
-	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
-	var out, errb bytes.Buffer
-	cmd.Stdout = &out
+	var errb bytes.Buffer
+	cmd.Stdout = io.Discard
 	cmd.Stderr = &errb
 	err := cmd.Run()
 	if err != nil {
 		if errb.Len() > 0 {
-			return out.String(), fmt.Errorf("%s", strings.TrimSpace(errb.String()))
+			return fmt.Errorf("%s", strings.TrimSpace(errb.String()))
 		}
-		return out.String(), err
+		return err
 	}
-	return out.String(), nil
+	return nil
 }
 
 // RunStream runs a command attached to the user's terminal, for package
@@ -58,7 +57,6 @@ func RunStream(name string, args ...string) error {
 		args = append(append([]string{}, ExtraArgs...), args...)
 	}
 	cmd := exec.Command(name, args...)
-	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

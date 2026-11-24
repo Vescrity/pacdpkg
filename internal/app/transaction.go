@@ -394,15 +394,13 @@ func (a *App) applyReasons(plan *deb.Plan, previous map[string]bool) {
 		auto = append(auto, p.Name)
 	}
 	if len(auto) > 0 {
-		if out, err := deb.Run("apt-mark", append([]string{"auto"}, auto...)...); err != nil {
+		if err := deb.Run("apt-mark", append([]string{"auto"}, auto...)...); err != nil {
 			Warnf("could not mark install reason: %v", err)
-			_ = out
 		}
 	}
 	if len(manual) > 0 {
-		if out, err := deb.Run("apt-mark", append([]string{"manual"}, manual...)...); err != nil {
+		if err := deb.Run("apt-mark", append([]string{"manual"}, manual...)...); err != nil {
 			Warnf("could not mark install reason: %v", err)
-			_ = out
 		}
 	}
 }

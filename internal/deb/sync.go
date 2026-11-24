@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -53,7 +52,7 @@ type Sync struct {
 const listDir = "/var/lib/apt/lists"
 
 // LoadSync parses every apt list. Files may be plain text or compressed;
-// compressed ones are streamed through apt-helper.
+// compressed ones are decompressed in-process.
 func LoadSync() (*Sync, error) {
 	entries, err := os.ReadDir(listDir)
 	if err != nil {
@@ -140,30 +139,25 @@ func repoFromListName(name string) string {
 	return strings.TrimSuffix(name, "_.")
 }
 
-type listReader struct {
-	io.ReadCloser
-	cmd *exec.Cmd
-}
-
-func (l *listReader) Close() error {
-	l.ReadCloser.Close()
-	return l.cmd.Wait()
+type fileReader struct {
+	io.Reader
+	io.Closer
 }
 
 func openList(path string) (io.ReadCloser, error) {
-	if strings.HasSuffix(path, "_Packages") {
-		return os.Open(path)
-	}
-	cmd := exec.Command("/usr/lib/apt/apt-helper", "cat-file", path)
-	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
-	out, err := cmd.StdoutPipe()
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	if err := cmd.Start(); err != nil {
+	if strings.HasSuffix(path, "_Packages") {
+		return f, nil
+	}
+	r, err := decompress(filepath.Base(path), f)
+	if err != nil {
+		f.Close()
 		return nil, err
 	}
-	return &listReader{ReadCloser: out, cmd: cmd}, nil
+	return fileReader{Reader: r, Closer: f}, nil
 }
 
 func parsePackagesList(r io.Reader, repo string, release *ReleaseInfo, src *SourceRepo, s *Sync, seen map[string]bool) error {
