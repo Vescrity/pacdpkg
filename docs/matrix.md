@@ -30,7 +30,7 @@
 | `-Sl` | 已实现 | 按仓库列出；仓库标签为 `<suite>/<component>`，flat 仓库取主机名；同一 (仓库, 包, 版本) 去重 |
 | `-Sg` / `-Sgg` | 已实现（近似） | 仍以 `Section` 当 group |
 | `-Sc` / `-Scc` | 已实现 | 自己清理 `/var/cache/apt/archives`：`-Sc` 保留所有已安装版本（pacman 的 KeepInstalled 语义），`-Scc` 清空 |
-| `-Sy` / `-Syy` | 已实现 | `apt-get update` 直接流式输出；`-Syy` 先把旧 lists 移到 `/var/cache/pacdpkg/lists-backup`，失败或索引缺失时精确回滚。apt 在部分仓库失败时仍返回 0，因此额外检查「备份中每个索引是否重新出现」以及「每个 (URI,suite) 至少有一个索引」 |
+| `-Sy` / `-Syy` | 已实现（有已知风险） | `-Syy` 先把旧 lists 移到 `/var/cache/pacdpkg/lists-backup`；中断时不会自动恢复。成功与否按备份文件名判断，源被删除或压缩格式变化时可能把成功刷新判为失败。 |
 | `-S` / `-Su` / `-Suu` | 已实现 | libapt 的 `pkgDepCache` / `pkgProblemResolver` 计算计划 → pacman 摘要 → 确认 → 同一份 depcache 走 `pkgPackageManager` 执行；`--needed`、`--asdeps`、`--asexplicit` 已映射 |
 | `-Sw` / `-Sp` / `--print-format` | 已实现 | `-Sw` 走 `--download-only` 并提示 `Proceed with download?`；`-Sp` 直接从计划与 sources 拼 URL（与 apt 的镜像选择、百分号转义一致），支持 `%n %v %r %s %a %l %f %d %p %u` |
 | `--dbonly` / `--noscriptlet` / `--assume-installed` / `--overwrite` | 明确拒绝 | deb 后端无等价语义（dpkg 只能全局覆盖，无法按路径限定），直接报错而不是静默降级 |
@@ -168,15 +168,15 @@ pacdpkg 不解析任何命令输出。查询数据直接读文件；事务计划
 
 ## 事务细节
 
-- `-Syu <targets>`：先做全系统升级，再处理指定目标（与 pacman 一致），不会变成局部升级
-- Held（`apt-mark hold`）的包在 `-Su` 中跳过并告警；显式 `-S` 指定时用 `--allow-change-held-packages` 放行
-- 依赖不会被静默降级：依赖要求的版本低于已安装版本时报错
-- `Breaks` 与 `Conflicts` 分开处理：`Breaks` 会尝试把被破坏的包升级到安全版本，达不到才报错；`Replaces` 不再被当作删除（Debian 的 Replaces 是文件接管）
-- 带版本约束的依赖按每个替代项自己的约束判定；未声明版本的 `Provides` 只满足无版本约束的依赖
-- `Pin-Priority <= 0` 的候选不会被选中；pin 规则按 apt 的“首个特定 pin + 通用 pin 取最大”
+- `-Su <targets>` 目前只升级指定目标，不做全系统升级
+- `apt-mark hold` 的包在 `-Su` 中跳过并告警；显式 `-S` / `-R` / `-U` 指定时按 HoldPkg 提示，确认后覆盖
+- 冲突或替换导致的删除按 pacman 的 `Remove ...?` / `Replace ...?` 提问；仅因依赖需要删除未点名的包时拒绝事务
+- 依赖闭包和 Breaks/Conflicts/Replaces 由 libapt 的 `pkgProblemResolver` 处理
+- 候选版本统一取仓库最高版本，因此 pin 和 phased updates 不生效
 - `-S repo/pkg` 与 `-S pkg=version` 都会把候选限制在指定仓库/版本内
-- 有 `Replaces` 关系时计划里会包含被替换包的删除，执行时与安装放在同一次 apt 调用里
-- `--nodeps` 的删除走 `dpkg -r --force-depends`（apt 会连带删依赖者），`-U` 的纯本地包走 `dpkg -i --force-depends`
-- `-Qkk` 会跳过 dpkg diversion 的路径（与 `dpkg -V` 一致），逐文件输出 `(Checksum mismatch)` / `(No such file or directory)`，不再中途中断
-- `-Sc` 尊重 `--cachedir`/`CacheDir`，持 apt 缓存锁，跳过 `lock`
-- 事务后按“显式目标→manual、其余沿用事务前状态”回填安装原因；读不到 `extended_states` 时跳过回填（`-Rs` 也会拒绝推断依赖）
+- `-Rdd` 的删除走 `dpkg -r --force-depends`，`-Udd` 的纯本地包走 `dpkg -i --force-depends`
+- `-Sc` 尊重 `--cachedir`/`CacheDir`，使用 `flock` 跳过 `lock`（尚未与 apt 的 fcntl 锁互斥）
+- 事务后由 depcache 把安装原因写回 `/var/lib/apt/extended_states`；`-Rs` 依赖 apt 的 auto 标记
+- 参数解析和查询仍使用 Go 侧模型；事务执行走 `pkgPackageManager`
+- `-T` / `-Dkk` / `-Qdt` 尚未迁移到 libapt，见上文偏差
+

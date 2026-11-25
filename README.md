@@ -14,9 +14,9 @@ make test
 make install                     # 安装到 /usr/local，含补全脚本
 ```
 
-`make build` 在没有 apt 头文件的机器上（例如 Arch）构建一个只支持查询的二进制；
-事务操作会提示没有 libapt 支持。Debian 系上装上 `libapt-pkg-dev` 后会默认链接
-`libapt-pkg`，需要保留查询-only 构建时用 `make build TAGS=`。
+`make build` 在没有 apt 头文件的机器上（例如 Arch）构建不链接 libapt 的版本，
+事务会退回内置的 Go 求解器，只适合开发和查询验证。Debian 系上装上
+`libapt-pkg-dev` 后会默认链接 `libapt-pkg`；需要显式关闭时用 `make build TAGS=`。
 
 `make install` 支持 `PREFIX`、`DATADIR`、`BASH_COMPDIR`、`ZSH_COMPDIR`，
 打包时按发行版布局覆盖即可。链接 libapt 后不是静态二进制，运行时依赖

@@ -325,6 +325,7 @@ bool openCache(AptSession *s, const AptRequest *req) {
          s->localByPkg[name] = deb;
    }
    bool lock = (req->flags & APT_FLAG_LOCK) != 0;
+   _config->Set("APT::Ignore-Hold", (req->flags & APT_FLAG_OVERRIDE_HELD) != 0 ? "true" : "false");
    s->lock = lock;
    if (!s->CF->BuildCaches(nullptr, lock))
       return false;
@@ -342,6 +343,8 @@ bool doInstall(AptSession *s, const AptRequest *req, std::vector<std::string> &p
    selectAllCandidates(C, D);
    bool needed = (req->flags & APT_FLAG_NEEDED) != 0;
    bool upgradeOnly = (req->flags & APT_FLAG_UPGRADE_ONLY) != 0;
+   bool asDeps = (req->flags & APT_FLAG_ASDEPS) != 0;
+   bool asExplicit = (req->flags & APT_FLAG_ASEXPLICIT) != 0;
    pkgProblemResolver Fix(&D);
    std::vector<pkgCache::PkgIterator> marked;
    for (int i = 0; i < req->ntargets; ++i) {
@@ -387,6 +390,12 @@ bool doInstall(AptSession *s, const AptRequest *req, std::vector<std::string> &p
          problems.push_back("could not resolve dependencies");
       return false;
    }
+   if (asDeps)
+      for (auto P : marked)
+         D.MarkAuto(P, true);
+   if (asExplicit)
+      for (auto P : marked)
+         D.MarkAuto(P, false);
    return true;
 }
 

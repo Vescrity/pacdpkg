@@ -38,14 +38,17 @@ type Target struct {
 
 // Options carry the operation flags that change the plan.
 type Options struct {
-	Needed      bool
-	Purge       bool
-	Recursive   int
-	Cascade     bool
-	ForceDeps   bool
-	Downgrade   bool
-	Lock        bool
-	UpgradeOnly bool
+	Needed       bool
+	Purge        bool
+	Recursive    int
+	Cascade      bool
+	ForceDeps    bool
+	Downgrade    bool
+	Lock         bool
+	UpgradeOnly  bool
+	AsDeps       bool
+	AsExplicit   bool
+	OverrideHeld bool
 }
 
 // Result is a resolved plan plus the libapt session that can execute it.
@@ -105,6 +108,15 @@ func flags(o Options) C.uint {
 	}
 	if o.UpgradeOnly {
 		f |= C.APT_FLAG_UPGRADE_ONLY
+	}
+	if o.AsDeps {
+		f |= C.APT_FLAG_ASDEPS
+	}
+	if o.AsExplicit {
+		f |= C.APT_FLAG_ASEXPLICIT
+	}
+	if o.OverrideHeld {
+		f |= C.APT_FLAG_OVERRIDE_HELD
 	}
 	return f
 }

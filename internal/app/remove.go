@@ -26,6 +26,7 @@ func (a *App) remove() int {
 	var explicit []string
 	seen := map[string]bool{}
 	missing := false
+	held := false
 	for _, t := range a.targets {
 		name := strings.TrimPrefix(t, "local/")
 		if db.Get(name) == nil {
@@ -37,6 +38,12 @@ func (a *App) remove() int {
 			continue
 		}
 		seen[name] = true
+		if db.Held(name) {
+			held = true
+			if !a.cfg.Print {
+				Warnf("%s is designated as a HoldPkg.", name)
+			}
+		}
 		explicit = append(explicit, name)
 	}
 	if missing {
@@ -57,7 +64,7 @@ func (a *App) remove() int {
 		fmt.Fprintln(os.Stdout, "checking dependencies...")
 	}
 
-	if a.warnHoldPkg(targets) &&
+	if !a.cfg.Print && (a.warnHoldPkg(targets) || held) &&
 		!render.Question("HoldPkg was found in target list. Do you want to continue?", false, a.cfg.NoConfirm) {
 		return 1
 	}
@@ -73,10 +80,11 @@ func (a *App) remove() int {
 			ats = append(ats, aptplan.Target{Name: name})
 		}
 		res, err := aptplan.Resolve(aptplan.OpRemove, ats, aptplan.Options{
-			Purge:     a.cfg.NoSave,
-			Recursive: a.cfg.Recursive,
-			Cascade:   a.cfg.Cascade,
-			Lock:      !a.cfg.Print,
+			Purge:        a.cfg.NoSave,
+			Recursive:    a.cfg.Recursive,
+			Cascade:      a.cfg.Cascade,
+			OverrideHeld: held,
+			Lock:         !a.cfg.Print,
 		})
 		if err != nil {
 			Errorf("%v", err)

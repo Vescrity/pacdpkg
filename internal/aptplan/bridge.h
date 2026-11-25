@@ -19,7 +19,10 @@ enum {
    APT_FLAG_FORCE_DEPS = 1 << 4,
    APT_FLAG_DOWNGRADE = 1 << 5,
    APT_FLAG_LOCK = 1 << 6,
-   APT_FLAG_UPGRADE_ONLY = 1 << 7
+   APT_FLAG_UPGRADE_ONLY = 1 << 7,
+   APT_FLAG_ASDEPS = 1 << 8,
+   APT_FLAG_ASEXPLICIT = 1 << 9,
+   APT_FLAG_OVERRIDE_HELD = 1 << 10
 };
 
 typedef struct {

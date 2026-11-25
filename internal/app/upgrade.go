@@ -9,6 +9,7 @@ import (
 	"pacdpkg/internal/alpm"
 	"pacdpkg/internal/aptplan"
 	"pacdpkg/internal/deb"
+	"pacdpkg/internal/render"
 )
 
 // upgrade implements -U: install or upgrade packages from local package files.
@@ -31,6 +32,7 @@ func (a *App) upgrade() int {
 	var targets []deb.InstallTarget
 	paths := make(map[string]string, len(a.targets))
 	seen := make(map[string]bool, len(a.targets))
+	overrideHeld := false
 	ret := 0
 	for _, path := range a.targets {
 		pf, err := deb.OpenPackageFile(path)
@@ -64,6 +66,14 @@ func (a *App) upgrade() int {
 				}
 			}
 		}
+		if db.Held(name) {
+			overrideHeld = true
+			if !a.cfg.Print && !a.cfg.DownloadOnly {
+				if !render.Question(name+" is in IgnorePkg/IgnoreGroup. Install anyway?", true, a.cfg.NoConfirm) {
+					return 1
+				}
+			}
+		}
 		seen[name] = true
 		targets = append(targets, deb.InstallTarget{
 			Name: name, Version: version, DebPath: path, Meta: pf.Pkg,
@@ -93,8 +103,11 @@ func (a *App) upgrade() int {
 			ats = append(ats, aptplan.Target{Name: t.Name, Version: t.Version, Deb: t.DebPath})
 		}
 		res, err := aptplan.Resolve(aptplan.OpInstall, ats, aptplan.Options{
-			Needed: a.cfg.Needed,
-			Lock:   !a.cfg.Print && !a.cfg.DownloadOnly,
+			Needed:       a.cfg.Needed,
+			AsDeps:       a.cfg.AsDeps,
+			AsExplicit:   a.cfg.AsExplicit,
+			OverrideHeld: overrideHeld,
+			Lock:         !a.cfg.Print && !a.cfg.DownloadOnly,
 		})
 		if err != nil {
 			Errorf("%v", err)

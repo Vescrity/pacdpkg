@@ -51,6 +51,7 @@ func (a *App) syncTransaction() int {
 		known[r] = true
 	}
 	var targets []deb.InstallTarget
+	overrideHeld := false
 	for _, t := range a.targets {
 		repo, name, version := splitSyncTarget(repos, t)
 		if repo != "" && !known[repo] {
@@ -88,6 +89,14 @@ func (a *App) syncTransaction() int {
 				}
 			}
 		}
+		if db.Held(name) {
+			overrideHeld = true
+			if !a.cfg.Print && !a.cfg.DownloadOnly {
+				if !render.Question(name+" is in IgnorePkg/IgnoreGroup. Install anyway?", true, a.cfg.NoConfirm) {
+					return 1
+				}
+			}
+		}
 		if a.ignored(name) || a.ignoredGroup(syncInfoPkg(cand)) {
 			if !render.Question(name+" is in IgnorePkg/IgnoreGroup. Install anyway?", true, a.cfg.NoConfirm) {
 				return 1
@@ -106,8 +115,11 @@ func (a *App) syncTransaction() int {
 			ats = append(ats, aptplan.Target{Name: t.Name, Version: t.Version, Repo: t.Repo})
 		}
 		res, err := aptplan.Resolve(aptplan.OpInstall, ats, aptplan.Options{
-			Needed: a.cfg.Needed,
-			Lock:   !a.cfg.Print && !a.cfg.DownloadOnly,
+			Needed:       a.cfg.Needed,
+			AsDeps:       a.cfg.AsDeps,
+			AsExplicit:   a.cfg.AsExplicit,
+			OverrideHeld: overrideHeld,
+			Lock:         !a.cfg.Print && !a.cfg.DownloadOnly,
 		})
 		if err != nil {
 			Errorf("%v", err)
