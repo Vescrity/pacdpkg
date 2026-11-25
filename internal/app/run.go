@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"unsafe"
 
 	"pacdpkg/internal/cli"
 	"pacdpkg/internal/conf"
@@ -106,9 +108,9 @@ func Run(argv []string) int {
 		set  bool
 		name string
 	}{
-		{cfg.Root != "", "--root"},
-		{cfg.DBPath != "", "--dbpath"},
-		{cfg.SysRoot != "", "--sysroot"},
+		{cfg.RootSet, "--root"},
+		{cfg.DBPathSet, "--dbpath"},
+		{cfg.SysRootSet, "--sysroot"},
 		{cfg.DBOnly, "--dbonly"},
 		{cfg.NoScriptlet, "--noscriptlet"},
 		{len(cfg.AssumeInstalled) > 0, "--assume-installed"},
@@ -120,9 +122,14 @@ func Run(argv []string) int {
 		}
 	}
 
+	if os.Geteuid() != 0 && cfg.NeedsRoot() {
+		Errorf("you cannot perform this operation unless you are root.")
+		return 1
+	}
+
 	confPath := cfg.ConfigFile
 	var cfgConf *conf.Config
-	if confPath != "" {
+	if cfg.ConfigSet {
 		cfgConf, err = conf.Load(confPath, true)
 		if err != nil {
 			Errorf("config file %s could not be read: %s", confPath, errText(err))
@@ -151,16 +158,27 @@ func Run(argv []string) int {
 		cfg.Arch = cfgConf.Architecture
 	}
 
+	if cfg.CacheDirSet {
+		if cfg.CacheDir == "" {
+			Errorf("failed to resolve path '' passed to '--cachedir': No such file or directory")
+			return 1
+		}
+		abs, err := filepath.Abs(cfg.CacheDir)
+		if err != nil {
+			Errorf("failed to resolve path '%s' passed to '--cachedir': %v", cfg.CacheDir, errText(err))
+			return 1
+		}
+		if st, err := os.Stat(abs); err != nil || !st.IsDir() {
+			Errorf("failed to resolve path '%s' passed to '--cachedir': No such file or directory", cfg.CacheDir)
+			return 1
+		}
+		cfg.CacheDir = abs
+	}
 	if cfg.CacheDir != "" {
 		deb.ExtraArgs = append(deb.ExtraArgs, "-o", "Dir::Cache::archives="+cfg.CacheDir)
 	}
 	if cfg.Arch != "" {
 		deb.ExtraArgs = append(deb.ExtraArgs, "-o", "APT::Architecture="+cfg.Arch)
-	}
-
-	if os.Geteuid() != 0 && cfg.NeedsRoot() {
-		Errorf("you cannot perform this operation unless you are root.")
-		return 1
 	}
 
 	targets, err = readStdinTargets(targets)
@@ -252,7 +270,7 @@ func readStdinTargets(targets []string) ([]string, error) {
 	if idx < 0 {
 		return targets, nil
 	}
-	if st, err := os.Stdin.Stat(); err == nil && st.Mode()&os.ModeCharDevice != 0 {
+	if isTerminal(os.Stdin) {
 		return nil, fmt.Errorf("argument '-' specified without input on stdin")
 	}
 	data, err := os.ReadFile("/dev/stdin")
@@ -309,4 +327,11 @@ func colorEnabled(cfg *cli.Config, c *conf.Config) bool {
 		return auto()
 	}
 	return auto() && c.Color != nil && *c.Color
+}
+
+func isTerminal(f *os.File) bool {
+	var termios syscall.Termios
+	_, _, errno := syscall.Syscall6(syscall.SYS_IOCTL, f.Fd(), uintptr(syscall.TCGETS),
+		uintptr(unsafe.Pointer(&termios)), 0, 0, 0)
+	return errno == 0
 }

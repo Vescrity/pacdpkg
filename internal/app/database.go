@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"pacdpkg/internal/aptplan"
 	"pacdpkg/internal/deb"
 )
 
@@ -81,6 +82,20 @@ func (a *App) checkLocalDB() int {
 // checkSyncDB implements -Dkk: every installed package's dependencies must
 // be satisfied by another installed package.
 func (a *App) checkSyncDB() int {
+	if aptplan.Available() {
+		if problems, err := aptplan.CheckDB(); err == nil {
+			for _, problem := range problems {
+				Errorf("%s", problem)
+			}
+			if len(problems) == 0 {
+				if !a.cfg.Quiet {
+					fmt.Fprintln(os.Stdout, "No database errors have been found!")
+				}
+				return 0
+			}
+			return 1
+		}
+	}
 	db, err := deb.Open()
 	if err != nil {
 		Errorf("could not read the dpkg database: %v", err)

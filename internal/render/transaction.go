@@ -79,23 +79,12 @@ func Transaction(w io.Writer, pkgs []TxPkg, verbose, downloadOnly bool, cols int
 
 	fmt.Fprintln(w)
 	if verbose {
-		verboseTable(w, pkgs)
-	} else {
-		names := make([]string, 0, len(pkgs))
-		for _, p := range pkgs {
-			ver := p.NewVersion
-			if ver == "" {
-				ver = p.OldVersion
-			}
-			name := p.Name + "-" + Faint(ver)
-			if p.removing() && mixedTransaction(pkgs) {
-				name += " " + Meta("[removal]")
-			}
-			names = append(names, name)
+		if !verboseTable(w, pkgs, cols) {
+			fmt.Fprintf(os.Stderr, "%sinsufficient columns available for table display\n", WarningPrefix())
+			classicList(w, pkgs, cols)
 		}
-		title := fmt.Sprintf("Packages (%d)", len(pkgs))
-		io.WriteString(w, Bold(title)+" ")
-		writeList(w, names, len(title)+1, cols)
+	} else {
+		classicList(w, pkgs, cols)
 	}
 	fmt.Fprintln(w)
 
@@ -118,7 +107,25 @@ func Transaction(w io.Writer, pkgs []TxPkg, verbose, downloadOnly bool, cols int
 	fmt.Fprintln(w)
 }
 
-func verboseTable(w io.Writer, pkgs []TxPkg) {
+func classicList(w io.Writer, pkgs []TxPkg, cols int) {
+	names := make([]string, 0, len(pkgs))
+	for _, p := range pkgs {
+		ver := p.NewVersion
+		if ver == "" {
+			ver = p.OldVersion
+		}
+		name := p.Name + "-" + Faint(ver)
+		if p.removing() && mixedTransaction(pkgs) {
+			name += " " + Meta("[removal]")
+		}
+		names = append(names, name)
+	}
+	title := fmt.Sprintf("Packages (%d)", len(pkgs))
+	io.WriteString(w, Bold(title)+" ")
+	writeList(w, names, len(title)+1, cols)
+}
+
+func verboseTable(w io.Writer, pkgs []TxPkg, cols int) bool {
 	hasOld, hasNew, hasNet, hasDl := false, false, false, false
 	for _, p := range pkgs {
 		hasOld = hasOld || p.OldVersion != ""
@@ -170,10 +177,10 @@ func verboseTable(w io.Writer, pkgs []TxPkg) {
 		header = append(header, "Download Size")
 		right = append(right, true)
 	}
-	table(w, header, rows, right)
+	return table(w, header, rows, right, cols)
 }
 
-func table(w io.Writer, header []string, rows [][]string, right []bool) {
+func table(w io.Writer, header []string, rows [][]string, right []bool, cols int) bool {
 	widths := make([]int, len(header))
 	for i, h := range header {
 		widths[i] = len(h)
@@ -208,11 +215,19 @@ func table(w io.Writer, header []string, rows [][]string, right []bool) {
 		}
 		fmt.Fprintln(w, strings.TrimRight(b.String(), " "))
 	}
+	total := 2 * (len(header) - 1)
+	for _, width := range widths {
+		total += width
+	}
+	if cols > 0 && total > cols {
+		return false
+	}
 	line(header, true)
 	line(make([]string, len(header)), false)
 	for _, row := range rows {
 		line(row, false)
 	}
+	return true
 }
 
 type sizeRow struct{ label, value string }

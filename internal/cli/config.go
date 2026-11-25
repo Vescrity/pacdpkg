@@ -12,17 +12,22 @@ type Config struct {
 	Help    bool
 	Version bool
 
-	DBPath     string
-	Root       string
-	SysRoot    string
-	Arch       string
-	CacheDir   string
-	ConfigFile string
-	HookDir    string
-	LogFile    string
-	GPGDir     string
-	Color      string
-	Ask        string
+	DBPath      string
+	DBPathSet   bool
+	Root        string
+	RootSet     bool
+	SysRoot     string
+	SysRootSet  bool
+	Arch        string
+	CacheDir    string
+	CacheDirSet bool
+	ConfigFile  string
+	ConfigSet   bool
+	HookDir     string
+	LogFile     string
+	GPGDir      string
+	Color       string
+	Ask         string
 
 	NoConfirm     bool
 	Debug         bool
@@ -82,16 +87,21 @@ func (c *Config) Apply(d *OptDef, arg string) error {
 	case "noop":
 	case "dbpath":
 		c.DBPath = arg
+		c.DBPathSet = true
 	case "root":
 		c.Root = arg
+		c.RootSet = true
 	case "sysroot":
 		c.SysRoot = arg
+		c.SysRootSet = true
 	case "arch":
 		c.Arch = arg
 	case "cachedir":
 		c.CacheDir = arg
+		c.CacheDirSet = true
 	case "config":
 		c.ConfigFile = arg
+		c.ConfigSet = true
 	case "hookdir":
 		c.HookDir = arg
 	case "logfile":

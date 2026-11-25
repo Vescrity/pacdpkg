@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"pacdpkg/internal/aptplan"
 	"pacdpkg/internal/deb"
 )
 
@@ -16,6 +17,23 @@ func (a *App) deptest() int {
 		return 1
 	}
 	missing := 0
+	if aptplan.Available() {
+		specs := make([]aptplan.DepSpec, 0, len(a.targets))
+		for _, t := range a.targets {
+			name, op, ver := parseConstraint(t)
+			specs = append(specs, aptplan.DepSpec{Name: name, Op: op, Version: ver})
+		}
+		unsatisfied, err := aptplan.CheckDeps(specs)
+		if err == nil {
+			for _, t := range unsatisfied {
+				fmt.Fprintln(os.Stdout, t)
+			}
+			if len(unsatisfied) > 0 {
+				return 127
+			}
+			return 0
+		}
+	}
 	for _, t := range a.targets {
 		name, op, ver := parseConstraint(t)
 		if !db.Satisfies(name, op, ver) {

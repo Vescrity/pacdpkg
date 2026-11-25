@@ -14,6 +14,7 @@ import (
 	"unsafe"
 
 	"pacdpkg/internal/alpm"
+	"pacdpkg/internal/aptplan"
 	"pacdpkg/internal/deb"
 	"pacdpkg/internal/render"
 )
@@ -434,6 +435,11 @@ func (a *App) filterSet(db *deb.DB) (*queryState, error) {
 }
 
 func unrequiredSet(db *deb.DB, level int) (map[string]bool, error) {
+	if aptplan.Available() {
+		if set, err := aptplan.Orphans(level > 1); err == nil {
+			return set, nil
+		}
+	}
 	db.EnsureReasons()
 	set := map[string]bool{}
 	for _, p := range db.Pkgs {

@@ -18,7 +18,7 @@
 | `-Qs` | 已实现 | 本地库对 name/description 做大小写不敏感正则匹配，仓库标签固定为 `local` |
 | `-Qe` / `-Qd` | 已实现 | 直接读 `/var/lib/apt/extended_states` 的 `Auto-Installed` |
 | `-Qm` / `-Qn` | 已实现 | 名字是否出现在 apt lists 中（本地库 + Release/pin 自行计算候选） |
-| `-Qdt` / `-Qdtt` | 已实现 | 自己算：auto 标记且无反向依赖；`-tt` 忽略 Recommend/Suggest。内核包会被列出（pacman 语义），apt 的 autoremove 会保护它们 |
+| `-Qdt` / `-Qdtt` | 已实现 | libapt 的 auto 标记和 `MarkAndSweep` 计算孤儿；`-Qdtt` 忽略 Recommends/Suggests |
 | `-Qu` | 已实现 | 自己从 apt lists + Release 元数据 + `/etc/apt/preferences` 选 candidate；hold/IgnorePkg → `[ignored]` |
 | `-Qk` | 已实现 | 文件列表逐个 `Lstat`，统计缺失数（不哈希） |
 | `-Qkk` | 已实现 | 自己比对 `.md5sums` 与 conffiles 哈希，统计变更/缺失 |
@@ -31,7 +31,7 @@
 | `-Sg` / `-Sgg` | 已实现（近似） | 仍以 `Section` 当 group |
 | `-Sc` / `-Scc` | 已实现 | 自己清理 `/var/cache/apt/archives`：`-Sc` 保留所有已安装版本（pacman 的 KeepInstalled 语义），`-Scc` 清空 |
 | `-Sy` / `-Syy` | 已实现（有已知风险） | `-Syy` 先把旧 lists 移到 `/var/cache/pacdpkg/lists-backup`；中断时不会自动恢复。成功与否按备份文件名判断，源被删除或压缩格式变化时可能把成功刷新判为失败。 |
-| `-S` / `-Su` / `-Suu` | 已实现 | libapt 的 `pkgDepCache` / `pkgProblemResolver` 计算计划 → pacman 摘要 → 确认 → 同一份 depcache 走 `pkgPackageManager` 执行；`--needed`、`--asdeps`、`--asexplicit` 已映射 |
+| `-S` / `-Su` / `-Suu` | 已实现 | libapt 的 `pkgDepCache` / `pkgProblemResolver` 计算计划 → pacman 摘要 → 确认 → 同一份 depcache 走 `pkgPackageManager` 执行；`-Su <targets>` 同时做全系统升级和目标；`--needed`、`--asdeps`、`--asexplicit` 已映射 |
 | `-Sw` / `-Sp` / `--print-format` | 已实现 | `-Sw` 走 `--download-only` 并提示 `Proceed with download?`；`-Sp` 直接从计划与 sources 拼 URL（与 apt 的镜像选择、百分号转义一致），支持 `%n %v %r %s %a %l %f %d %p %u` |
 | `--dbonly` / `--noscriptlet` / `--assume-installed` / `--overwrite` | 明确拒绝 | deb 后端无等价语义（dpkg 只能全局覆盖，无法按路径限定），直接报错而不是静默降级 |
 | `--nodeps` | 按操作映射 | `-R` 用 `dpkg -r --force-depends`（apt 会连带删依赖者），`-U` 对纯本地包用 `dpkg -i --force-depends`；`-S` 无等价语义，报错 |
@@ -45,10 +45,10 @@
 | `-Rp` / `--print-format` | 已实现 | `name-version` / `%n %v %r %l`；`-n` + `-p` 按 pacman 报冲突 |
 | `-U` / `-Udd` / `-U --needed` | 已实现 | 本地 deb 通过 `debDebPkgFileIndex` 加进 libapt 缓存后求解，执行走 `pkgDPkgPM`；`-Udd` 仍走 `dpkg --force-depends` |
 | `-Up` / `--print-format` | 已实现 | 默认输出文件路径；`%a %d %p %u` 来自包的 control 字段 |
-| `-T` | 已实现 | 解析 pacman 依赖语法（`= >= <= > <`），支持 Provides，未满足输出并以 **127** 退出 |
+| `-T` | 已实现 | libapt 缓存检查已安装包、版本化 Provides 和 alternatives，未满足输出并以 **127** 退出 |
 | `-D --asdeps` / `--asexplicit` | 已实现 | `apt-mark auto/manual`，成功提示与 `-q` 抑制同 pacman |
 | `-Dk` | 已实现 | 直接扫描 status 的非干净状态；无问题输出 `No database errors have been found!` |
-| `-Dkk` | 已实现 | 用本地库自己做依赖满足检查，输出 pacman 的 `missing '<dep>' dependency for '<pkg>'` |
+| `-Dkk` | 已实现 | libapt 的当前依赖状态检查，输出 pacman 的 `missing '<dep>' dependency for '<pkg>'` |
 | `-F` / `-Fq` / `-Fx` / `--machinereadable` | 已实现 | 基于 apt Contents 索引；含 `/` 的目标按完整路径精确匹配，否则匹配 basename，`-Fx` 正则作用于同一范围 |
 | `-Fl` | 已实现 | 从 Contents 索引按包列出文件；`-Fl repo/pkg` 支持含斜杠的仓库标签 |
 | `-Fy` / `-Fyy` | 已实现 | 优先复用 apt 已维护的 `Contents-*`（`50apt-file.conf` 启用后由 `apt-get update` 更新），没有时按 Release 声明的压缩格式（bz2/xz/zst/gz/lz4/未压缩）下载；`-Fyy` 强制走网络。发布方没有 Contents 的仓库只报一条警告，至少一个仓库成功即返回 0 |
@@ -162,21 +162,18 @@ pacdpkg 不解析任何命令输出。查询数据直接读文件；事务计划
 1. 不遵循 apt 的 pin 和 phased updates：候选版本取仓库里的最高版本
 2. Recommends/Suggests 不安装（pacman 的 optdepends 语义）
 3. 与已安装包冲突或替换时按 pacman 的 `Remove ...?` / `Replace ...?` 提问；为了依赖而删除未点名的包会直接拒绝
-4. `-Su <targets>` 目前只升级指定目标，不做「先全系统升级再处理目标」
-5. 查询用的仓库索引仍只加载本机架构；事务由 libapt 处理多架构
-6. `-T` / `-Dkk` / `-Qdt` 仍使用 Go 侧依赖模型，尚未迁移到 libapt
+4. 查询用的仓库索引仍只加载本机架构；事务由 libapt 处理多架构
 
 ## 事务细节
 
-- `-Su <targets>` 目前只升级指定目标，不做全系统升级
+- `-Su <targets>` 先做全系统升级，再合并显式目标，和 pacman 一致
 - `apt-mark hold` 的包在 `-Su` 中跳过并告警；显式 `-S` / `-R` / `-U` 指定时按 HoldPkg 提示，确认后覆盖
 - 冲突或替换导致的删除按 pacman 的 `Remove ...?` / `Replace ...?` 提问；仅因依赖需要删除未点名的包时拒绝事务
 - 依赖闭包和 Breaks/Conflicts/Replaces 由 libapt 的 `pkgProblemResolver` 处理
 - 候选版本统一取仓库最高版本，因此 pin 和 phased updates 不生效
 - `-S repo/pkg` 与 `-S pkg=version` 都会把候选限制在指定仓库/版本内
 - `-Rdd` 的删除走 `dpkg -r --force-depends`，`-Udd` 的纯本地包走 `dpkg -i --force-depends`
-- `-Sc` 尊重 `--cachedir`/`CacheDir`，使用 `flock` 跳过 `lock`（尚未与 apt 的 fcntl 锁互斥）
+- `-Sc` 尊重 `--cachedir`/`CacheDir`，使用与 apt 相同的 fcntl 锁，拿不到锁就失败
 - 事务后由 depcache 把安装原因写回 `/var/lib/apt/extended_states`；`-Rs` 依赖 apt 的 auto 标记
-- 参数解析和查询仍使用 Go 侧模型；事务执行走 `pkgPackageManager`
-- `-T` / `-Dkk` / `-Qdt` 尚未迁移到 libapt，见上文偏差
+- `-T` / `-Dkk` / `-Qdt` 已使用 libapt；查询输出仍由 Go 的 render 层排版
 

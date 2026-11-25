@@ -49,6 +49,8 @@ type Options struct {
 	AsDeps       bool
 	AsExplicit   bool
 	OverrideHeld bool
+	IgnorePkgs   []string
+	IgnoreGroups []string
 }
 
 // Result is a resolved plan plus the libapt session that can execute it.
@@ -134,11 +136,15 @@ func Resolve(op Op, targets []Target, o Options) (*Result, error) {
 	versions := newCStringArray(n)
 	repos := newCStringArray(n)
 	debs := newCStringArray(n)
+	ignp := newCStringArray(len(o.IgnorePkgs))
+	igng := newCStringArray(len(o.IgnoreGroups))
 	defer func() {
 		freeCStringArray(names, n)
 		freeCStringArray(versions, n)
 		freeCStringArray(repos, n)
 		freeCStringArray(debs, n)
+		freeCStringArray(ignp, len(o.IgnorePkgs))
+		freeCStringArray(igng, len(o.IgnoreGroups))
 	}()
 	for i, t := range targets {
 		setCString(names, i, t.Name)
@@ -147,16 +153,30 @@ func Resolve(op Op, targets []Target, o Options) (*Result, error) {
 		setCString(debs, i, t.Deb)
 	}
 
+	for i, pat := range o.IgnorePkgs {
+		setCString(ignp, i, pat)
+	}
+	for i, pat := range o.IgnoreGroups {
+		setCString(igng, i, pat)
+	}
 	req := C.AptRequest{
-		op:       C.int(op),
-		flags:    flags(o),
-		ntargets: C.int(n),
+		op:            C.int(op),
+		flags:         flags(o),
+		ntargets:      C.int(n),
+		nignorepkgs:   C.int(len(o.IgnorePkgs)),
+		nignoregroups: C.int(len(o.IgnoreGroups)),
 	}
 	if n > 0 {
 		req.names = names
 		req.versions = versions
 		req.repos = repos
 		req.debs = debs
+	}
+	if len(o.IgnorePkgs) > 0 {
+		req.ignorepkgs = ignp
+	}
+	if len(o.IgnoreGroups) > 0 {
+		req.ignoregroups = igng
 	}
 
 	var sess *C.AptSession
@@ -301,4 +321,84 @@ func freeCStringArray(arr **C.char, n int) {
 		C.free(unsafe.Pointer(p))
 	}
 	C.free(unsafe.Pointer(arr))
+}
+
+// DepSpec is one pacman-style dependency test target.
+type DepSpec struct {
+	Name    string
+	Op      string
+	Version string
+}
+
+type wireList struct {
+	Error    string   `json:"error"`
+	Missing  []string `json:"missing"`
+	Problems []string `json:"problems"`
+	Orphans  []string `json:"orphans"`
+}
+
+// CheckDeps reports which dependency targets are not satisfied by installed
+// packages.
+func CheckDeps(specs []DepSpec) ([]string, error) {
+	n := len(specs)
+	names := newCStringArray(n)
+	ops := newCStringArray(n)
+	versions := newCStringArray(n)
+	defer func() {
+		freeCStringArray(names, n)
+		freeCStringArray(ops, n)
+		freeCStringArray(versions, n)
+	}()
+	for i, spec := range specs {
+		setCString(names, i, spec.Name)
+		setCString(ops, i, spec.Op)
+		setCString(versions, i, spec.Version)
+	}
+	q := C.AptDepQuery{ntargets: C.int(n)}
+	if n > 0 {
+		q.names = names
+		q.ops = ops
+		q.versions = versions
+	}
+	return callList(C.aptplan_checkdeps(&q))
+}
+
+// CheckDB reports installed packages with unsatisfied dependencies.
+func CheckDB() ([]string, error) {
+	return callList(C.aptplan_checkdb())
+}
+
+// Orphans returns packages installed as dependencies that are no longer
+// required. With ignoreOptdeps, Recommends and Suggests are not considered.
+func Orphans(ignoreOptdeps bool) (map[string]bool, error) {
+	list, err := callList(C.aptplan_orphans(C.int(boolInt(ignoreOptdeps))))
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(list))
+	for _, name := range list {
+		out[name] = true
+	}
+	return out, nil
+}
+
+func callList(res *C.char) ([]string, error) {
+	if res == nil {
+		return nil, fmt.Errorf("libapt returned no response")
+	}
+	defer C.aptplan_free(res)
+	var wire wireList
+	if err := json.Unmarshal([]byte(C.GoString(res)), &wire); err != nil {
+		return nil, fmt.Errorf("could not parse the libapt response: %v", err)
+	}
+	if wire.Error != "" {
+		return nil, fmt.Errorf("%s", wire.Error)
+	}
+	if wire.Missing != nil {
+		return wire.Missing, nil
+	}
+	if wire.Problems != nil {
+		return wire.Problems, nil
+	}
+	return wire.Orphans, nil
 }

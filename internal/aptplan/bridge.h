@@ -33,7 +33,18 @@ typedef struct {
    const char **repos;
    const char **debs;
    int ntargets;
+   const char **ignorepkgs;
+   int nignorepkgs;
+   const char **ignoregroups;
+   int nignoregroups;
 } AptRequest;
+
+typedef struct {
+   const char **names;
+   const char **ops;
+   const char **versions;
+   int ntargets;
+} AptDepQuery;
 
 typedef struct AptSession AptSession;
 
@@ -41,6 +52,10 @@ char *aptplan_resolve(const AptRequest *req, AptSession **session);
 char *aptplan_execute(AptSession *session, int download_only);
 void aptplan_close(AptSession *session);
 void aptplan_free(char *ptr);
+
+char *aptplan_checkdeps(const AptDepQuery *q);
+char *aptplan_checkdb(void);
+char *aptplan_orphans(int ignore_optdeps);
 
 #ifdef __cplusplus
 }

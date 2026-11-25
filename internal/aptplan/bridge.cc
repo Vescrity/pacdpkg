@@ -25,6 +25,7 @@
 #include <apt-pkg/install-progress.h>
 
 #include <algorithm>
+#include <fnmatch.h>
 #include <map>
 #include <sstream>
 
@@ -399,13 +400,77 @@ bool doInstall(AptSession *s, const AptRequest *req, std::vector<std::string> &p
    return true;
 }
 
+bool matchesPattern(const char *value, const char **patterns, int count) {
+   if (value == nullptr)
+      return false;
+   for (int i = 0; i < count; ++i)
+      if (patterns[i] != nullptr && fnmatch(patterns[i], value, 0) == 0)
+         return true;
+   return false;
+}
+
+bool isExplicitTarget(const std::string &name, const AptRequest *req) {
+   for (int i = 0; i < req->ntargets; ++i) {
+      const char *target = req->names == nullptr ? nullptr : req->names[i];
+      if (target == nullptr)
+         continue;
+      if (name == target)
+         return true;
+      std::string bare = target;
+      auto pos = bare.find(':');
+      if (pos != std::string::npos && bare.substr(0, pos) == name)
+         return true;
+   }
+   return false;
+}
+
 bool doUpgrade(AptSession *s, const AptRequest *req, std::vector<std::string> &problems) {
    pkgCache &C = *s->CF->GetPkgCache();
    pkgDepCache &D = *s->CF->GetDepCache();
    selectAllCandidates(C, D);
    bool allowDowngrade = (req->flags & APT_FLAG_DOWNGRADE) != 0;
+   bool needed = (req->flags & APT_FLAG_NEEDED) != 0;
+   bool upgradeOnly = (req->flags & APT_FLAG_UPGRADE_ONLY) != 0;
    pkgProblemResolver Fix(&D);
    std::vector<pkgCache::PkgIterator> marked;
+
+   // Explicit targets are handled first so -Su pkg behaves like pacman.
+   for (int i = 0; i < req->ntargets; ++i) {
+      const char *name = req->names == nullptr ? nullptr : req->names[i];
+      if (name == nullptr || name[0] == '\0')
+         continue;
+      pkgCache::PkgIterator P = findPkg(C, name);
+      if (P.end()) {
+         problems.push_back(std::string("target not found: ") + name);
+         return false;
+      }
+      if (upgradeOnly && P.CurrentVer().end())
+         continue;
+      pkgCache::VerIterator V = selectVersion(P, req->versions ? req->versions[i] : nullptr,
+                                              req->repos ? req->repos[i] : nullptr);
+      if (V.end()) {
+         std::string what = name;
+         if (req->versions && req->versions[i] && req->versions[i][0])
+            what += std::string("=") + req->versions[i];
+         problems.push_back("version not found: " + what);
+         return false;
+      }
+      D.SetCandidateVersion(V);
+      if (!P.CurrentVer().end() &&
+          _system->VS->CmpVersion(V.VerStr(), P.CurrentVer().VerStr()) == 0) {
+         if (needed)
+            continue;
+         D.SetReInstall(P, true);
+      }
+      Fix.Clear(P);
+      Fix.Protect(P);
+      if (!D.MarkInstall(P, false)) {
+         problems.push_back(std::string("could not mark ") + name + " for install");
+         return false;
+      }
+      marked.push_back(P);
+   }
+
    for (pkgCache::PkgIterator P = C.PkgBegin(); !P.end(); ++P) {
       if (P.CurrentVer().end())
          continue;
@@ -414,6 +479,13 @@ bool doUpgrade(AptSession *s, const AptRequest *req, std::vector<std::string> &p
       pkgCache::VerIterator V = D.GetCandidateVersion(P);
       if (V.end())
          continue;
+      std::string name = P.Name();
+      if (!isExplicitTarget(name, req)) {
+         if (matchesPattern(name.c_str(), req->ignorepkgs, req->nignorepkgs))
+            continue;
+         if (matchesPattern(V.Section(), req->ignoregroups, req->nignoregroups))
+            continue;
+      }
       int c = _system->VS->CmpVersion(V.VerStr(), P.CurrentVer().VerStr());
       if (c > 0 || (allowDowngrade && c < 0)) {
          Fix.Clear(P);
@@ -587,6 +659,71 @@ std::vector<Action> collectActions(AptSession *s) {
    return out;
 }
 
+bool versionOK(const char *have, const char *op, const char *want) {
+   if (op == nullptr || op[0] == '\0')
+      return true;
+   if (have == nullptr)
+      return false;
+   int c = _system->VS->CmpVersion(have, want == nullptr ? "" : want);
+   std::string o = op;
+   if (o == "=")
+      return c == 0;
+   if (o == ">=")
+      return c >= 0;
+   if (o == "<=")
+      return c <= 0;
+   if (o == ">>" || o == ">")
+      return c > 0;
+   if (o == "<<" || o == "<")
+      return c < 0;
+   return false;
+}
+
+bool installedSatisfies(pkgCache &C, const std::string &name, const char *op, const char *want) {
+   pkgCache::PkgIterator P = findPkg(C, name);
+   if (P.end())
+      return false;
+   pkgCache::VerIterator V = P.CurrentVer();
+   if (!V.end() && versionOK(V.VerStr(), op, want))
+      return true;
+   for (pkgCache::PrvIterator Prv = P.ProvidesList(); !Prv.end(); ++Prv) {
+      pkgCache::VerIterator OV = Prv.OwnerVer();
+      if (OV.end() || OV.ParentPkg().CurrentVer() != OV)
+         continue;
+      const char *pv = Prv.ProvideVersion();
+      const char *have = (pv != nullptr && pv[0] != '\0') ? pv : OV.VerStr();
+      if (versionOK(have, op, want))
+         return true;
+   }
+   return false;
+}
+
+std::string depGroupString(pkgCache::DepIterator Start, pkgCache::DepIterator End) {
+   std::string out;
+   for (pkgCache::DepIterator D = Start;; ++D) {
+      if (!out.empty())
+         out += "|";
+      out += D.TargetPkg().Name();
+      if (D.TargetVer() != nullptr)
+         out += std::string(D.CompType()) + D.TargetVer();
+      if (D == End)
+         break;
+   }
+   return out;
+}
+
+std::string listJSON(const char *key, const std::vector<std::string> &items) {
+   std::ostringstream o;
+   o << "{\"" << key << "\":[";
+   for (size_t i = 0; i < items.size(); ++i) {
+      if (i)
+         o << ",";
+      o << jsonEscape(items[i]);
+   }
+   o << "]}";
+   return o.str();
+}
+
 } // namespace
 
 extern "C" {
@@ -658,12 +795,11 @@ char *aptplan_execute(AptSession *s, int download_only) {
             pkgPackageManager::OrderResult r = PM->DoInstall(progress);
             delete progress;
             _system->LockInner();
+            D.writeStateFile(nullptr, true);
             if (r != pkgPackageManager::Completed) {
                err = errorsToString();
                if (err.empty())
                   err = "installation failed";
-            } else {
-               D.writeStateFile(nullptr);
             }
          }
       }
@@ -678,6 +814,88 @@ void aptplan_close(AptSession *s) {
    delete s->Recs;
    delete s->CF;
    delete s;
+}
+
+char *aptplan_checkdeps(const AptDepQuery *q) {
+   if (q == nullptr)
+      return dupJSON("{\"error\":\"invalid query\"}");
+   if (!ensureInit())
+      return dupJSON("{\"error\":\"could not initialize libapt\"}");
+   _error->Discard();
+   pkgCacheFile CF;
+   if (!CF.ReadOnlyOpen())
+      return dupJSON("{\"error\":" + jsonEscape(errorsToString()) + "}");
+   pkgCache &C = *CF.GetPkgCache();
+   std::vector<std::string> missing;
+   for (int i = 0; i < q->ntargets; ++i) {
+      const char *name = q->names == nullptr ? nullptr : q->names[i];
+      if (name == nullptr || name[0] == '\0')
+         continue;
+      const char *op = q->ops == nullptr ? nullptr : q->ops[i];
+      const char *ver = q->versions == nullptr ? nullptr : q->versions[i];
+      if (installedSatisfies(C, name, op, ver))
+         continue;
+      std::string spec = name;
+      if (op != nullptr)
+         spec += op;
+      if (ver != nullptr)
+         spec += ver;
+      missing.push_back(spec);
+   }
+   return dupJSON(listJSON("missing", missing));
+}
+
+char *aptplan_checkdb(void) {
+   if (!ensureInit())
+      return dupJSON("{\"error\":\"could not initialize libapt\"}");
+   _error->Discard();
+   pkgCacheFile CF;
+   if (!CF.ReadOnlyOpen())
+      return dupJSON("{\"error\":" + jsonEscape(errorsToString()) + "}");
+   pkgCache &C = *CF.GetPkgCache();
+   pkgDepCache &D = *CF.GetDepCache();
+   std::vector<std::string> problems;
+   for (pkgCache::PkgIterator P = C.PkgBegin(); !P.end(); ++P) {
+      pkgCache::VerIterator V = P.CurrentVer();
+      if (V.end() || !D[P].NowBroken())
+         continue;
+      for (pkgCache::DepIterator Dep = V.DependsList(); !Dep.end();) {
+         pkgCache::DepIterator Start;
+         pkgCache::DepIterator End;
+         Dep.GlobOr(Start, End);
+         if (End->Type != pkgCache::Dep::Depends && End->Type != pkgCache::Dep::PreDepends)
+            continue;
+         if ((D[End] & pkgDepCache::DepGNow) == pkgDepCache::DepGNow)
+            continue;
+         problems.push_back("missing '" + depGroupString(Start, End) +
+                            "' dependency for '" + P.Name() + "'");
+      }
+   }
+   return dupJSON(listJSON("problems", problems));
+}
+
+char *aptplan_orphans(int ignore_optdeps) {
+   if (!ensureInit())
+      return dupJSON("{\"error\":\"could not initialize libapt\"}");
+   _error->Discard();
+   _config->Set("APT::Install-Recommends", ignore_optdeps ? "false" : "true");
+   _config->Set("APT::Install-Suggests", ignore_optdeps ? "false" : "true");
+   pkgCacheFile CF;
+   bool ok = CF.ReadOnlyOpen();
+   std::vector<std::string> orphans;
+   if (ok) {
+      pkgCache &C = *CF.GetPkgCache();
+      pkgDepCache &D = *CF.GetDepCache();
+      D.MarkAndSweep();
+      for (pkgCache::PkgIterator P = C.PkgBegin(); !P.end(); ++P)
+         if (!P.CurrentVer().end() && D[P].Garbage)
+            orphans.push_back(P.Name());
+   }
+   _config->Set("APT::Install-Recommends", "false");
+   _config->Set("APT::Install-Suggests", "false");
+   if (!ok)
+      return dupJSON("{\"error\":" + jsonEscape(errorsToString()) + "}");
+   return dupJSON(listJSON("orphans", orphans));
 }
 
 void aptplan_free(char *ptr) {
@@ -713,6 +931,32 @@ char *aptplan_execute(AptSession *session, int download_only) {
 
 void aptplan_close(AptSession *session) {
    (void) session;
+}
+
+char *aptplan_checkdeps(const AptDepQuery *q) {
+   (void) q;
+   const char *msg = "{\"error\":\"pacdpkg was built without libapt support\"}";
+   char *p = static_cast<char *>(std::malloc(std::strlen(msg) + 1));
+   if (p != nullptr)
+      std::memcpy(p, msg, std::strlen(msg) + 1);
+   return p;
+}
+
+char *aptplan_checkdb(void) {
+   const char *msg = "{\"error\":\"pacdpkg was built without libapt support\"}";
+   char *p = static_cast<char *>(std::malloc(std::strlen(msg) + 1));
+   if (p != nullptr)
+      std::memcpy(p, msg, std::strlen(msg) + 1);
+   return p;
+}
+
+char *aptplan_orphans(int ignore_optdeps) {
+   (void) ignore_optdeps;
+   const char *msg = "{\"error\":\"pacdpkg was built without libapt support\"}";
+   char *p = static_cast<char *>(std::malloc(std::strlen(msg) + 1));
+   if (p != nullptr)
+      std::memcpy(p, msg, std::strlen(msg) + 1);
+   return p;
 }
 
 void aptplan_free(char *ptr) {

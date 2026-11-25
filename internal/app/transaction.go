@@ -163,34 +163,56 @@ func (a *App) syncUpgrade() int {
 		fmt.Fprintln(os.Stdout, "looking for conflicting packages...")
 	}
 	var targets []deb.InstallTarget
+	var ats []aptplan.Target
+	explicit := map[string]bool{}
+	overrideHeld := false
 	if len(a.targets) > 0 {
 		repos := sync.Repos()
 		for _, t := range a.targets {
 			repo, name, version := splitSyncTarget(repos, t)
 			targets = append(targets, deb.InstallTarget{Name: name, Repo: repo, Version: version})
+			ats = append(ats, aptplan.Target{Name: name, Repo: repo, Version: version})
+			explicit[name] = true
+			if cand := sync.CandidateIn(repo, name); cand != nil &&
+				(a.ignored(name) || a.ignoredGroup(syncInfoPkg(cand))) {
+				if !a.cfg.Print && !a.cfg.DownloadOnly &&
+					!render.Question(name+" is in IgnorePkg/IgnoreGroup. Install anyway?", true, a.cfg.NoConfirm) {
+					return 1
+				}
+			}
+			if db.Held(name) {
+				overrideHeld = true
+				if !a.cfg.Print && !a.cfg.DownloadOnly &&
+					!render.Question(name+" is in IgnorePkg/IgnoreGroup. Install anyway?", true, a.cfg.NoConfirm) {
+					return 1
+				}
+			}
 		}
 	}
 	if !a.cfg.Print {
 		for _, p := range db.Pkgs {
-			if cand := sync.CandidateIn("", p.Name); cand != nil &&
-				db.Held(p.Name) && alpm.CompareVersion(cand.Version, p.Version) > 0 {
+			if explicit[p.Name] {
+				continue
+			}
+			cand := sync.CandidateIn("", p.Name)
+			if cand == nil || alpm.CompareVersion(cand.Version, p.Version) <= 0 {
+				continue
+			}
+			if a.ignored(p.Name) || a.ignoredGroup(p) {
+				Warnf("%s: ignoring package upgrade (%s => %s)", p.Name, p.Version, cand.Version)
+			} else if db.Held(p.Name) {
 				Warnf("%s: ignoring package upgrade (held)", p.Name)
 			}
 		}
 	}
-	if aptplan.Available() && !a.hasIgnore() {
-		op := aptplan.OpUpgrade
-		var ats []aptplan.Target
-		if len(targets) > 0 {
-			op = aptplan.OpInstall
-			for _, t := range targets {
-				ats = append(ats, aptplan.Target{Name: t.Name, Version: t.Version, Repo: t.Repo})
-			}
-		}
-		res, err := aptplan.Resolve(op, ats, aptplan.Options{
-			Downgrade:   a.cfg.SysUpgrade > 1,
-			UpgradeOnly: len(targets) > 0,
-			Lock:        !a.cfg.Print && !a.cfg.DownloadOnly,
+	if aptplan.Available() {
+		res, err := aptplan.Resolve(aptplan.OpUpgrade, ats, aptplan.Options{
+			Downgrade:    a.cfg.SysUpgrade > 1,
+			Needed:       a.cfg.Needed,
+			OverrideHeld: overrideHeld,
+			IgnorePkgs:   append(append([]string{}, a.cfg.IgnorePkg...), a.conf.IgnorePkg...),
+			IgnoreGroups: append(append([]string{}, a.cfg.IgnoreGroup...), a.conf.IgnoreGroup...),
+			Lock:         !a.cfg.Print && !a.cfg.DownloadOnly,
 		})
 		if err != nil {
 			Errorf("%v", err)
@@ -533,13 +555,10 @@ func (a *App) printPlan(plan *deb.Plan, paths map[string]string) {
 			"%v": p.NewVersion,
 			"%r": repos,
 			"%l": a.pkgLocation(p, paths),
-			"%s": "",
-			"%a": "",
-			"%d": "",
-			"%p": "",
-			"%u": "",
-			"%f": "",
-			"%h": "",
+			"%s": "", "%a": "", "%b": "", "%d": "", "%e": "", "%f": "",
+			"%g": "", "%h": "", "%p": "", "%u": "",
+			"%C": "", "%D": "", "%G": "", "%H": "", "%L": "", "%M": "",
+			"%O": "", "%P": "", "%R": "",
 		}
 		repl["%s"] = size
 		if p.Sync != nil {
@@ -551,7 +570,8 @@ func (a *App) printPlan(plan *deb.Plan, paths map[string]string) {
 			repl["%h"] = p.Sync.SHA256
 		}
 		pairs := make([]string, 0, len(repl)*2)
-		for _, k := range []string{"%a", "%d", "%f", "%h", "%n", "%p", "%v", "%l", "%r", "%s", "%u"} {
+		for _, k := range []string{"%a", "%b", "%d", "%e", "%f", "%g", "%h", "%n", "%p", "%v",
+			"%l", "%r", "%s", "%u", "%C", "%D", "%G", "%H", "%L", "%M", "%O", "%P", "%R"} {
 			pairs = append(pairs, k, repl[k])
 		}
 		line = strings.NewReplacer(pairs...).Replace(line)
@@ -563,7 +583,10 @@ func (a *App) printPlan(plan *deb.Plan, paths map[string]string) {
 			"%v", p.Version,
 			"%r", "local",
 			"%l", p.Name+"-"+p.Version,
-			"%s", "", "%a", "", "%d", "", "%p", "", "%u", "", "%f", "", "%h", "",
+			"%s", "", "%a", "", "%b", "", "%d", "", "%e", "", "%f", "",
+			"%g", "", "%h", "", "%p", "", "%u", "",
+			"%C", "", "%D", "", "%G", "", "%H", "", "%L", "", "%M", "",
+			"%O", "", "%P", "", "%R", "",
 		).Replace(format)
 		fmt.Fprintln(os.Stdout, line)
 	}
@@ -609,10 +632,6 @@ func (a *App) ignoredGroup(p *alpm.Pkg) bool {
 		}
 	}
 	return false
-}
-
-func (a *App) hasIgnore() bool {
-	return len(a.cfg.IgnorePkg)+len(a.conf.IgnorePkg)+len(a.cfg.IgnoreGroup)+len(a.conf.IgnoreGroup) > 0
 }
 
 // confirmRemovals asks pacman's conflict and replacement questions for
