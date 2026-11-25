@@ -13,7 +13,7 @@ import (
 
 // Seams so tests can supply package data.
 var (
-	loadFilesSync = deb.LoadSync
+	loadFilesSync = deb.LoadSyncArch
 	openLocalDB   = deb.Open
 )
 
@@ -46,7 +46,7 @@ func (a *App) files() int {
 
 func (a *App) filesRefresh() int {
 	fmt.Fprintln(os.Stdout, ":: Synchronizing package databases...")
-	targets, err := deb.ContentsTargets(deb.ContentsArch(a.cfg.Arch))
+	targets, err := deb.ContentsTargets(deb.ContentsArch(a.effectiveArch()))
 	if err != nil {
 		Errorf("failed to synchronize all databases: %v", err)
 		return 1
@@ -84,9 +84,9 @@ type fileVersions struct {
 	byName map[string]string
 }
 
-func newFileVersions() *fileVersions {
+func newFileVersions(arch string) *fileVersions {
 	v := &fileVersions{byRepo: map[string]string{}, byName: map[string]string{}}
-	sync, err := loadFilesSync()
+	sync, err := loadFilesSync(arch)
 	if err != nil {
 		return v
 	}
@@ -161,7 +161,7 @@ func (a *App) filesSearch(db *deb.ContentsDB) int {
 
 	var versions *fileVersions
 	if !a.cfg.Quiet || a.cfg.MachineReadable {
-		versions = newFileVersions()
+		versions = newFileVersions(a.effectiveArch())
 	}
 	var local *deb.DB
 	if !a.cfg.Quiet && !a.cfg.MachineReadable {
@@ -247,7 +247,7 @@ func (a *App) printFileMatch(repo, pkg string, paths []string, exact bool, versi
 func (a *App) filesList(db *deb.ContentsDB) int {
 	var versions *fileVersions
 	if a.cfg.MachineReadable {
-		versions = newFileVersions()
+		versions = newFileVersions(a.effectiveArch())
 	}
 
 	if len(a.targets) == 0 {

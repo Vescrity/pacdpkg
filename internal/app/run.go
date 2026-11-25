@@ -157,8 +157,14 @@ func Run(argv []string) int {
 	if cfg.Arch == "" && cfgConf.Architecture != "" && cfgConf.Architecture != "auto" {
 		cfg.Arch = cfgConf.Architecture
 	}
+	if cfg.Arch != "" {
+		cfg.Arch = deb.DebArch(cfg.Arch)
+	}
 	if len(cfg.ArchList) == 0 && cfg.Arch != "" {
 		cfg.ArchList = []string{cfg.Arch}
+	}
+	for i := range cfg.ArchList {
+		cfg.ArchList[i] = deb.DebArch(cfg.ArchList[i])
 	}
 
 	if cfg.CacheDirSet {

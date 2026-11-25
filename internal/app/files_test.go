@@ -39,7 +39,7 @@ func filesTestEnv(t *testing.T) string {
 	t.Setenv("PACDPKG_FILES_DIR", dir)
 
 	oldSync, oldDB := loadFilesSync, openLocalDB
-	loadFilesSync = func() (*deb.Sync, error) { return filesSyncFixture(), nil }
+	loadFilesSync = func(string) (*deb.Sync, error) { return filesSyncFixture(), nil }
 	openLocalDB = func() (*deb.DB, error) { return nil, errors.New("no dpkg database") }
 	t.Cleanup(func() {
 		loadFilesSync, openLocalDB = oldSync, oldDB

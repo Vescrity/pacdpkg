@@ -85,9 +85,9 @@ func (a *App) remove() int {
 			Cascade:       a.cfg.Cascade,
 			OverrideHeld:  held,
 			Lock:          !a.cfg.Print,
-			Arch:          a.cfg.Arch,
+			Arch:          a.effectiveArch(),
 			Cachedir:      a.cfg.CacheDir,
-			Architectures: a.cfg.ArchList,
+			Architectures: a.effectiveArchitectures(),
 		})
 		if err != nil {
 			Errorf("%v", err)

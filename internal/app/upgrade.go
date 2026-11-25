@@ -108,9 +108,9 @@ func (a *App) upgrade() int {
 			AsExplicit:    a.cfg.AsExplicit,
 			OverrideHeld:  overrideHeld,
 			Lock:          !a.cfg.Print && !a.cfg.DownloadOnly,
-			Arch:          a.cfg.Arch,
+			Arch:          a.effectiveArch(),
 			Cachedir:      a.cfg.CacheDir,
-			Architectures: a.cfg.ArchList,
+			Architectures: a.effectiveArchitectures(),
 		})
 		if err != nil {
 			Errorf("%v", err)

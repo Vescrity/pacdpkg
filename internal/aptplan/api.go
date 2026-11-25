@@ -422,3 +422,25 @@ func callList(res *C.char) ([]string, error) {
 	}
 	return wire.Orphans, nil
 }
+
+type wireArch struct {
+	Error string `json:"error"`
+	Arch  string `json:"arch"`
+}
+
+// NativeArch returns libapt's configured native architecture.
+func NativeArch() (string, error) {
+	res := C.aptplan_nativearch()
+	if res == nil {
+		return "", fmt.Errorf("libapt returned no response")
+	}
+	defer C.aptplan_free(res)
+	var wire wireArch
+	if err := json.Unmarshal([]byte(C.GoString(res)), &wire); err != nil {
+		return "", fmt.Errorf("could not parse the libapt response: %v", err)
+	}
+	if wire.Error != "" {
+		return "", fmt.Errorf("%s", wire.Error)
+	}
+	return wire.Arch, nil
+}

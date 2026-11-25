@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -169,25 +168,10 @@ func dirWritable(dir string) bool {
 
 // ContentsArch maps pacman-style architecture names to Debian ones.
 func ContentsArch(configured string) string {
-	arch := configured
-	if arch == "auto" {
-		arch = ""
+	if configured == "auto" {
+		return ""
 	}
-	if arch == "" {
-		arch = nativeArch()
-	}
-	if arch == "" {
-		arch = runtime.GOARCH
-	}
-	switch arch {
-	case "x86_64":
-		return "amd64"
-	case "aarch64":
-		return "arm64"
-	case "i686", "i586":
-		return "i386"
-	}
-	return arch
+	return DebArch(configured)
 }
 
 // OpenContents reads the headers of every index file in dir.

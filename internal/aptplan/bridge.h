@@ -60,6 +60,7 @@ void aptplan_free(char *ptr);
 char *aptplan_checkdeps(const AptDepQuery *q);
 char *aptplan_checkdb(void);
 char *aptplan_orphans(int ignore_optdeps);
+char *aptplan_nativearch(void);
 
 #ifdef __cplusplus
 }

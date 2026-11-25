@@ -835,6 +835,14 @@ void aptplan_close(AptSession *s) {
    delete s;
 }
 
+char *aptplan_nativearch(void) {
+   if (!ensureInit())
+      return dupJSON("{\"error\":\"could not initialize libapt\"}");
+   std::ostringstream o;
+   o << "{\"arch\":" << jsonEscape(_config->Find("APT::Architecture")) << "}";
+   return dupJSON(o.str());
+}
+
 char *aptplan_checkdeps(const AptDepQuery *q) {
    if (q == nullptr)
       return dupJSON("{\"error\":\"invalid query\"}");
@@ -951,6 +959,14 @@ char *aptplan_execute(AptSession *session, int download_only) {
 
 void aptplan_close(AptSession *session) {
    (void) session;
+}
+
+char *aptplan_nativearch(void) {
+   const char *msg = "{\"error\":\"pacdpkg was built without libapt support\"}";
+   char *p = static_cast<char *>(std::malloc(std::strlen(msg) + 1));
+   if (p != nullptr)
+      std::memcpy(p, msg, std::strlen(msg) + 1);
+   return p;
 }
 
 char *aptplan_checkdeps(const AptDepQuery *q) {

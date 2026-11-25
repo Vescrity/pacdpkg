@@ -49,7 +49,7 @@ func (a *App) sync() int {
 }
 
 func (a *App) loadSync() *deb.Sync {
-	s, err := deb.LoadSync()
+	s, err := deb.LoadSyncArch(a.effectiveArch())
 	if err != nil {
 		Errorf("could not read the package lists: %v", err)
 		return nil
@@ -370,7 +370,7 @@ func (a *App) syncRefresh() int {
 		Errorf("could not get the package list lock: %v", err)
 		return 1
 	}
-	if broken := repositoriesWithoutIndex(); len(broken) > 0 {
+	if broken := repositoriesWithoutIndex(a.effectiveArch()); len(broken) > 0 {
 		Errorf("failed to synchronize all databases (failed to retrieve some files)")
 		for _, repo := range broken {
 			Warnf("no package index for repository: %s", repo)
@@ -453,9 +453,9 @@ func recoverLists() {
 
 // repositoriesWithoutIndex reports configured repositories that produced no
 // package index at all.
-func repositoriesWithoutIndex() []string {
+func repositoriesWithoutIndex(arch string) []string {
 	var broken []string
-	for _, group := range deb.ExpectedListGroups() {
+	for _, group := range deb.ExpectedListGroups(arch) {
 		found := false
 		for _, name := range group {
 			if indexExists(name) {

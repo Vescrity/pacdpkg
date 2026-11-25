@@ -240,39 +240,6 @@ func parseDeb822(text string) []sourceEntry {
 	return out
 }
 
-// nativeArch returns the architecture of the installed system, derived from
-// dpkg's status file.
-func nativeArch() string {
-	stanzas, err := readStanzas(statusFile)
-	if err != nil {
-		return "amd64"
-	}
-	counts := map[string]int{}
-	for _, st := range stanzas {
-		if a := st.fields["Architecture"]; a != "" {
-			counts[a]++
-		}
-	}
-	type kv struct {
-		arch string
-		n    int
-	}
-	var list []kv
-	for a, n := range counts {
-		list = append(list, kv{a, n})
-	}
-	sort.Slice(list, func(i, j int) bool {
-		if list[i].n != list[j].n {
-			return list[i].n > list[j].n
-		}
-		return list[i].arch < list[j].arch
-	})
-	if len(list) == 0 {
-		return "amd64"
-	}
-	return list[0].arch
-}
-
 func hostOf(uri string) string {
 	uri = strings.TrimPrefix(strings.TrimPrefix(uri, "https://"), "http://")
 	return strings.TrimSuffix(uri, "/")
@@ -280,8 +247,8 @@ func hostOf(uri string) string {
 
 // ExpectedListFiles returns the binary index filenames apt should have after
 // a successful update.
-func ExpectedListFiles() []string {
-	repos := loadSourceRepos(nativeArch())
+func ExpectedListFiles(arch string) []string {
+	repos := loadSourceRepos(arch)
 	out := make([]string, 0, len(repos))
 	for name := range repos {
 		out = append(out, name)
@@ -292,8 +259,7 @@ func ExpectedListFiles() []string {
 
 // ExpectedListGroups groups the expected index filenames by repository
 // (URI + suite). A repository only has to publish one of its components.
-func ExpectedListGroups() [][]string {
-	arch := nativeArch()
+func ExpectedListGroups(arch string) [][]string {
 	groups := map[string][]string{}
 	for _, src := range loadSources() {
 		key := src.uri + "|" + src.suite

@@ -51,15 +51,19 @@ type Sync struct {
 
 const listDir = "/var/lib/apt/lists"
 
-// LoadSync parses every apt list. Files may be plain text or compressed;
-// compressed ones are decompressed in-process.
+// LoadSync parses the apt lists for the native architecture.
 func LoadSync() (*Sync, error) {
+	return LoadSyncArch(NativeArch())
+}
+
+// LoadSyncArch parses every apt list for arch. Files may be plain text or
+// compressed; compressed ones are decompressed in-process.
+func LoadSyncArch(arch string) (*Sync, error) {
 	entries, err := os.ReadDir(listDir)
 	if err != nil {
 		return nil, err
 	}
 	s := &Sync{byName: map[string][]*SyncPkg{}}
-	arch := nativeArch()
 	repos := loadSourceRepos(arch)
 	releases := loadReleases()
 	seen := map[string]bool{}
