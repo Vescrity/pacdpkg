@@ -17,10 +17,14 @@ func versionSatisfies(version, op, want string) bool {
 		return c == 0
 	case "!=":
 		return c != 0
-	case ">=", ">>":
+	case ">=":
 		return c >= 0
-	case "<=", "<<":
+	case ">>":
+		return c > 0
+	case "<=":
 		return c <= 0
+	case "<<":
+		return c < 0
 	case ">":
 		return c > 0
 	case "<":
