@@ -95,7 +95,7 @@ func TestPkgInfoLayout(t *testing.T) {
 func TestSearchResultLayout(t *testing.T) {
 	p := &alpm.Pkg{Name: "bash", Version: "1.0", Description: "The shell"}
 	var b bytes.Buffer
-	SearchResult(&b, p, "local", false, 0)
+	SearchResult(&b, p, "local", "", false, 0)
 	want := "local/bash 1.0\n    The shell\n"
 	if b.String() != want {
 		t.Errorf("SearchResult = %q, want %q", b.String(), want)

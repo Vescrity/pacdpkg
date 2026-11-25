@@ -104,15 +104,7 @@ func (a *App) syncSearch() int {
 			continue
 		}
 		seen[key] = true
-		if a.cfg.Quiet {
-			fmt.Fprintln(os.Stdout, p.Name)
-		} else {
-			fmt.Fprintf(os.Stdout, "%s/%s %s%s\n",
-				render.Repo(p.Repo), render.Bold(p.Name), render.Version(p.Version),
-				render.Meta(installedMark(db, p.Name, p.Version)))
-			fmt.Fprint(os.Stdout, "    ")
-			fmt.Fprintln(os.Stdout, p.Description)
-		}
+		render.SearchResult(os.Stdout, syncInfoPkg(p), p.Repo, installedMark(db, p.Name, p.Version), a.cfg.Quiet, getCols())
 		found = true
 	}
 	if !found {

@@ -67,7 +67,9 @@ func (a *App) checkLocalDB() int {
 		return 1
 	}
 	if len(problems) == 0 {
-		fmt.Fprintln(os.Stdout, "No database errors have been found!")
+		if !a.cfg.Quiet {
+			fmt.Fprintln(os.Stdout, "No database errors have been found!")
+		}
 		return 0
 	}
 	for _, line := range problems {
@@ -94,7 +96,9 @@ func (a *App) checkSyncDB() int {
 		}
 	}
 	if broken == 0 {
-		fmt.Fprintln(os.Stdout, "No database errors have been found!")
+		if !a.cfg.Quiet {
+			fmt.Fprintln(os.Stdout, "No database errors have been found!")
+		}
 		return 0
 	}
 	return 1

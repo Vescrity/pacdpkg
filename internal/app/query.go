@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
+	"unsafe"
 
 	"pacdpkg/internal/alpm"
 	"pacdpkg/internal/deb"
@@ -17,14 +19,16 @@ import (
 )
 
 func getCols() int {
-	st, err := os.Stdout.Stat()
-	if err != nil || st.Mode()&os.ModeCharDevice == 0 {
-		return 0
-	}
 	if c := os.Getenv("COLUMNS"); c != "" {
 		if n, err := strconv.Atoi(c); err == nil && n > 0 {
 			return n
 		}
+	}
+	var ws struct{ Row, Col, X, Y uint16 }
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, os.Stdout.Fd(),
+		uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
+	if errno == 0 && ws.Col > 0 {
+		return int(ws.Col)
 	}
 	return 80
 }
@@ -61,7 +65,7 @@ func (a *App) querySearch(db *deb.DB) int {
 		if len(res) > 0 && !searchMatches(res, p) {
 			continue
 		}
-		render.SearchResult(os.Stdout, p, "local", a.cfg.Quiet, getCols())
+		render.SearchResult(os.Stdout, p, "local", "", a.cfg.Quiet, getCols())
 		match = true
 	}
 	if !match {
@@ -146,6 +150,10 @@ func (a *App) queryGroup(db *deb.DB) int {
 }
 
 func (a *App) queryOwns(db *deb.DB) int {
+	if len(a.targets) == 0 {
+		Errorf("no targets specified (use -h for help)")
+		return 1
+	}
 	type target struct {
 		path    string
 		display string
@@ -394,7 +402,12 @@ func (a *App) display(db *deb.DB, p *alpm.Pkg, st *queryState) bool {
 	}
 	if cfg.Changelog {
 		if text, ok := deb.Changelog(p.Name); ok {
+			fmt.Fprintf(os.Stdout, "Changelog for %s:\n", p.Name)
 			io.WriteString(os.Stdout, text)
+			if !strings.HasSuffix(text, "\n") {
+				fmt.Fprintln(os.Stdout)
+			}
+			fmt.Fprintln(os.Stdout)
 		} else {
 			Errorf("no changelog available for '%s'.", p.Name)
 		}
@@ -424,7 +437,9 @@ func (a *App) checkPackage(db *deb.DB, p *alpm.Pkg) bool {
 		return false
 	}
 	if a.cfg.Check == 1 {
-		fmt.Fprintf(os.Stdout, "%s: %d total files, %d missing files\n", p.Name, res.Total, res.Missing)
+		if !a.cfg.Quiet {
+			fmt.Fprintf(os.Stdout, "%s: %d total files, %d missing files\n", p.Name, res.Total, res.Missing)
+		}
 		for _, path := range res.MissingPaths {
 			Warnf("%s: %s (No such file or directory)", p.Name, path)
 		}
@@ -433,10 +448,16 @@ func (a *App) checkPackage(db *deb.DB, p *alpm.Pkg) bool {
 	for _, path := range res.MissingPaths {
 		Warnf("%s: %s (No such file or directory)", p.Name, path)
 	}
-	for _, path := range res.AlteredPaths {
-		Warnf("%s: %s (Checksum mismatch)", p.Name, path)
+	for i, path := range res.AlteredPaths {
+		reason := "Checksum mismatch"
+		if i < len(res.AlteredReasons) {
+			reason = res.AlteredReasons[i]
+		}
+		Warnf("%s: %s (%s)", p.Name, path, reason)
 	}
-	fmt.Fprintf(os.Stdout, "%s: %d total files, %d altered files\n", p.Name, res.Total, res.Altered+res.Missing)
+	if !a.cfg.Quiet {
+		fmt.Fprintf(os.Stdout, "%s: %d total files, %d altered files\n", p.Name, res.Total, res.Altered+res.Missing)
+	}
 	return res.Altered == 0 && res.Missing == 0
 }
 

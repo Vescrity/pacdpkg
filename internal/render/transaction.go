@@ -60,7 +60,7 @@ func mixedTransaction(pkgs []TxPkg) bool {
 
 // Transaction prints the transaction summary. With verbose (VerbosePkgLists
 // in pacman.conf) a table is shown, otherwise the compact list.
-func Transaction(w io.Writer, pkgs []TxPkg, verbose, downloadOnly bool) {
+func Transaction(w io.Writer, pkgs []TxPkg, verbose, downloadOnly bool, cols int) {
 	pkgs = append([]TxPkg(nil), pkgs...)
 	sortTargets(pkgs)
 
@@ -77,6 +77,7 @@ func Transaction(w io.Writer, pkgs []TxPkg, verbose, downloadOnly bool) {
 		}
 	}
 
+	fmt.Fprintln(w)
 	if verbose {
 		verboseTable(w, pkgs)
 	} else {
@@ -92,7 +93,9 @@ func Transaction(w io.Writer, pkgs []TxPkg, verbose, downloadOnly bool) {
 			}
 			names = append(names, name)
 		}
-		fmt.Fprintf(w, "Packages (%d) %s\n", len(pkgs), strings.Join(names, "  "))
+		title := fmt.Sprintf("Packages (%d)", len(pkgs))
+		io.WriteString(w, Bold(title)+" ")
+		writeList(w, names, len(title)+1, cols)
 	}
 	fmt.Fprintln(w)
 
@@ -128,7 +131,11 @@ func verboseTable(w io.Writer, pkgs []TxPkg) {
 	right := []bool{false}
 	rows := make([][]string, 0, len(pkgs))
 	for _, p := range pkgs {
-		row := []string{p.Name}
+		name := p.Name
+		if p.Repo != "" && p.Repo != "local" {
+			name = p.Repo + "/" + p.Name
+		}
+		row := []string{name}
 		if hasOld {
 			row = append(row, p.OldVersion)
 		}

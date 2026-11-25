@@ -92,19 +92,20 @@ func parseDepAtom(s string) (name, op, version string) {
 
 // Pkg is the pacman-shaped view of a Debian package.
 type Pkg struct {
-	Name        string
-	Version     string
-	Arch        string
-	Description string
-	URL         string
-	Licenses    []string
-	Groups      []string
-	Provides    []Dep
-	Depends     []Dep
-	OptDepends  []Dep
-	Conflicts   []Dep
-	Breaks      []Dep
-	Replaces    []Dep
+	Name                string
+	Version             string
+	Arch                string
+	Description         string
+	URL                 string
+	Licenses            []string
+	Groups              []string
+	Provides            []Dep
+	Depends             []Dep
+	OptDepends          []Dep
+	OptDependsInstalled []bool
+	Conflicts           []Dep
+	Breaks              []Dep
+	Replaces            []Dep
 
 	Repo          string
 	Binary        string

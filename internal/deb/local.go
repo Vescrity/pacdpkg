@@ -206,6 +206,12 @@ func (db *DB) Enrich(p *alpm.Pkg) {
 	if p.Licenses == nil {
 		p.Licenses = licenses(p.Name)
 	}
+	if len(p.OptDepends) > 0 {
+		p.OptDependsInstalled = make([]bool, len(p.OptDepends))
+		for i, dep := range p.OptDepends {
+			p.OptDependsInstalled[i] = db.DepSatisfied(dep, nil)
+		}
+	}
 	for i := range p.Conffiles {
 		cf := &p.Conffiles[i]
 		st, err := os.Lstat(cf.Path)

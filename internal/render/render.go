@@ -60,6 +60,18 @@ func NoneIfEmpty(items []string) []string {
 	return items
 }
 
+func optDepStrings(p *alpm.Pkg) []string {
+	out := make([]string, 0, len(p.OptDepends))
+	for i, d := range p.OptDepends {
+		s := d.String()
+		if i < len(p.OptDependsInstalled) && p.OptDependsInstalled[i] {
+			s += " [installed]"
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
 func depStrings(deps []alpm.Dep) []string {
 	out := make([]string, 0, len(deps))
 	for _, d := range deps {
@@ -102,8 +114,29 @@ func Field(w io.Writer, name, value string, cols int) {
 	io.WriteString(w, "\n")
 }
 
+func writeList(w io.Writer, items []string, indent, cols int) {
+	line := 0
+	width := cols - indent
+	for i, item := range items {
+		if i == 0 {
+			io.WriteString(w, item)
+			line = len(item)
+			continue
+		}
+		if width > 0 && line+2+len(item) > width {
+			io.WriteString(w, "\n"+strings.Repeat(" ", indent)+item)
+			line = len(item)
+			continue
+		}
+		io.WriteString(w, "  "+item)
+		line += 2 + len(item)
+	}
+	io.WriteString(w, "\n")
+}
+
 func FieldList(w io.Writer, name string, items []string, cols int) {
-	Field(w, name, strings.Join(NoneIfEmpty(items), "  "), cols)
+	io.WriteString(w, Bold(title(name))+" ")
+	writeList(w, NoneIfEmpty(items), titleWidth+3, cols)
 }
 
 func FieldLinebreak(w io.Writer, name string, items []string, cols int) {
@@ -146,7 +179,7 @@ func PkgInfo(w io.Writer, p *alpm.Pkg, o InfoOpts) {
 	FieldList(w, "Groups", p.Groups, o.Cols)
 	FieldList(w, "Provides", depStrings(p.Provides), o.Cols)
 	FieldList(w, "Depends On", depStrings(p.Depends), o.Cols)
-	FieldLinebreak(w, "Optional Deps", depStrings(p.OptDepends), o.Cols)
+	FieldLinebreak(w, "Optional Deps", optDepStrings(p), o.Cols)
 
 	if o.Extra || o.Origin == FromLocal {
 		FieldList(w, "Required By", p.RequiredBy, o.Cols)
@@ -199,7 +232,9 @@ func PkgInfo(w io.Writer, p *alpm.Pkg, o InfoOpts) {
 		}
 		Field(w, "Install Script", script, o.Cols)
 	}
-	Field(w, "Validated By", p.Validated, o.Cols)
+	if !(o.Origin == FromSync && o.Extra) {
+		Field(w, "Validated By", p.Validated, o.Cols)
+	}
 	switch {
 	case o.Extra && o.Origin == FromSync:
 		Field(w, "MD5 Sum", p.MD5, o.Cols)
@@ -211,13 +246,21 @@ func PkgInfo(w io.Writer, p *alpm.Pkg, o InfoOpts) {
 
 	if o.Extra {
 		if o.Origin == FromLocal {
-			io.WriteString(w, title("Backup Files")+"\n")
-			for _, cf := range p.Conffiles {
+			indent := titleWidth + 3
+			if len(p.Conffiles) == 0 {
+				io.WriteString(w, Bold(title("Backup Files"))+" (none)\n")
+			}
+			for i, cf := range p.Conffiles {
 				state := "[unmodified]"
 				if cf.Modified {
 					state = "[modified]"
 				}
-				io.WriteString(w, strings.Repeat(" ", titleWidth+3)+cf.Path+" "+state+"\n")
+				if i == 0 {
+					io.WriteString(w, Bold(title("Backup Files"))+" ")
+				} else {
+					io.WriteString(w, strings.Repeat(" ", indent))
+				}
+				io.WriteString(w, cf.Path+" "+state+"\n")
 			}
 		}
 		Field(w, "Extended Data", "pkgtype=deb", o.Cols)
@@ -248,12 +291,12 @@ func UpgradeLine(w io.Writer, p *alpm.Pkg, newver string, ignored, quiet bool) {
 	fmt.Fprintln(w)
 }
 
-func SearchResult(w io.Writer, p *alpm.Pkg, repo string, quiet bool, cols int) {
+func SearchResult(w io.Writer, p *alpm.Pkg, repo, mark string, quiet bool, cols int) {
 	if quiet {
 		fmt.Fprintln(w, p.Name)
 		return
 	}
-	fmt.Fprintf(w, "%s/%s %s\n", Repo(repo), Bold(p.Name), Version(p.Version))
+	fmt.Fprintf(w, "%s/%s %s%s\n", Repo(repo), Bold(p.Name), Version(p.Version), Meta(mark))
 	io.WriteString(w, "    ")
 	writeWrapped(w, p.Description, 4, cols)
 	io.WriteString(w, "\n")

@@ -117,6 +117,7 @@ func (a *App) upgrade() int {
 			a.reportPlanProblems(nil, res.Problems)
 			return 1
 		}
+		enrichPlan(nil, db, res.Plan)
 		if !a.confirmRemovals(res.Plan) {
 			aptplan.Close(res.Session)
 			return 1

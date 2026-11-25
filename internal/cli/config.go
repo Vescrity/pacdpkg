@@ -244,9 +244,6 @@ func (c *Config) CheckArgs() error {
 	case OpQuery:
 		return c.checkQueryArgs()
 	case OpFiles:
-		if c.FileRegex && c.List {
-			return invalidOpt(true, "--regex", "--list")
-		}
 	case OpDatabase:
 		if err := invalidOpt(c.AsDeps && c.AsExplicit, "--asdeps", "--asexplicit"); err != nil {
 			return err

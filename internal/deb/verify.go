@@ -15,11 +15,18 @@ import (
 // VerifyResult counts the files of a package that are missing or whose
 // contents no longer match dpkg's recorded checksums.
 type VerifyResult struct {
-	Total        int
-	Missing      int
-	Altered      int
-	MissingPaths []string
-	AlteredPaths []string
+	Total          int
+	Missing        int
+	Altered        int
+	MissingPaths   []string
+	AlteredPaths   []string
+	AlteredReasons []string
+}
+
+func (r *VerifyResult) altered(path, reason string) {
+	r.Altered++
+	r.AlteredPaths = append(r.AlteredPaths, path)
+	r.AlteredReasons = append(r.AlteredReasons, reason)
 }
 
 func (db *DB) Verify(p *alpm.Pkg, full bool) (VerifyResult, error) {
@@ -63,8 +70,7 @@ func (db *DB) Verify(p *alpm.Pkg, full bool) (VerifyResult, error) {
 			continue
 		}
 		if !st.Mode().IsRegular() {
-			res.Altered++
-			res.AlteredPaths = append(res.AlteredPaths, path)
+			res.altered(path, "File type mismatch")
 			continue
 		}
 		if want, ok := sums[path]; ok {
@@ -73,8 +79,7 @@ func (db *DB) Verify(p *alpm.Pkg, full bool) (VerifyResult, error) {
 				continue
 			}
 			if sum != want {
-				res.Altered++
-				res.AlteredPaths = append(res.AlteredPaths, path)
+				res.altered(path, "MD5 checksum mismatch")
 			}
 		}
 	}
@@ -89,8 +94,7 @@ func (db *DB) Verify(p *alpm.Pkg, full bool) (VerifyResult, error) {
 			continue
 		}
 		if !st.Mode().IsRegular() {
-			res.Altered++
-			res.AlteredPaths = append(res.AlteredPaths, cf.Path)
+			res.altered(cf.Path, "File type mismatch")
 			continue
 		}
 		sum, err := md5FileErr(cf.Path)
@@ -98,8 +102,7 @@ func (db *DB) Verify(p *alpm.Pkg, full bool) (VerifyResult, error) {
 			continue
 		}
 		if sum != cf.Sum {
-			res.Altered++
-			res.AlteredPaths = append(res.AlteredPaths, cf.Path)
+			res.altered(cf.Path, "MD5 checksum mismatch")
 		}
 	}
 	return res, nil

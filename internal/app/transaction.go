@@ -129,7 +129,7 @@ func (a *App) syncTransaction() int {
 			a.reportPlanProblems(nil, res.Problems)
 			return 1
 		}
-		enrichPlan(sync, res.Plan)
+		enrichPlan(sync, db, res.Plan)
 		if !a.confirmRemovals(res.Plan) {
 			aptplan.Close(res.Session)
 			return 1
@@ -200,7 +200,7 @@ func (a *App) syncUpgrade() int {
 			a.reportPlanProblems(nil, res.Problems)
 			return 1
 		}
-		enrichPlan(sync, res.Plan)
+		enrichPlan(sync, db, res.Plan)
 		return a.commitPlan(res.Plan, txOpts{})
 	}
 	plan, problems := sync.ResolveInstall(db, targets, true)
@@ -286,7 +286,7 @@ func (a *App) commitPlan(plan *deb.Plan, o txOpts) int {
 		tx = append(tx, render.TxPkg{Name: p.Name, OldVersion: p.Version, InstalledSize: p.InstalledSize})
 	}
 
-	render.Transaction(os.Stdout, tx, a.conf.VerbosePkgLists, a.cfg.DownloadOnly)
+	render.Transaction(os.Stdout, tx, a.conf.VerbosePkgLists, a.cfg.DownloadOnly, getCols())
 	question := o.question
 	if question == "" {
 		question = "Proceed with installation?"
@@ -647,11 +647,16 @@ func (a *App) confirmRemovals(plan *deb.Plan) bool {
 
 // enrichPlan fills in the repository URL and display metadata that libapt's
 // cache does not expose through its public iterators.
-func enrichPlan(sync *deb.Sync, plan *deb.Plan) {
+func enrichPlan(sync *deb.Sync, db *deb.DB, plan *deb.Plan) {
 	if sync == nil || plan == nil {
 		return
 	}
 	for _, p := range plan.Install {
+		if db != nil && p.OldVersion != "" {
+			if local := db.Get(p.Name); local != nil {
+				p.Local = local
+			}
+		}
 		if p.DebPath != "" {
 			continue
 		}
