@@ -17,7 +17,7 @@
 | `-Qo` | 已实现 | 只解析目录部分（与 pacman 的 `lrealpath` 一致），再从各包 `.list` 建索引查属主；比 `dpkg -S` 的文本解析更完整 |
 | `-Qs` | 已实现 | 本地库对 name/description 做大小写不敏感正则匹配，仓库标签固定为 `local` |
 | `-Qe` / `-Qd` | 已实现 | 直接读 `/var/lib/apt/extended_states` 的 `Auto-Installed` |
-| `-Qm` / `-Qn` | 已实现 | 名字是否出现在 apt lists 中（本地库 + Release/pin 自行计算候选） |
+| `-Qm` / `-Qn` | 已实现 | libapt 的候选版本和仓库来源判断 |
 | `-Qdt` / `-Qdtt` | 已实现 | libapt 的 auto 标记和 `MarkAndSweep` 计算孤儿；`-Qdtt` 忽略 Recommends/Suggests |
 | `-Qu` | 已实现 | 自己从 apt lists + Release 元数据 + `/etc/apt/preferences` 选 candidate；hold/IgnorePkg → `[ignored]` |
 | `-Qk` | 已实现 | 文件列表逐个 `Lstat`，统计缺失数（不哈希） |
@@ -39,7 +39,7 @@
 | `--cachedir` / `--arch` / `--config` / `--noconfirm` / `--confirm` / `-v` | 已映射 | libapt 的 `Dir::Cache::archives`、`APT::Architecture`/`APT::Architectures` / pacdpkg.conf 方言 / 单布尔三态 / 配置横幅 |
 | `--color` / `-v` / 配置文件 | 已实现 | `--color always/never/auto`；只读取 `/etc/pacdpkg.conf`；`Color` 选项按 pacman 语义（仅在 tty 上生效），颜色码与 pacman 的 `enable_colors()` 完全一致 |
 | `--debug` / `--ask` / `--hookdir` / `--gpgdir` / `--logfile` | 仅校验/接受 | 无 hooks；apt 管理自身信任与日志 |
-| `-R` / `-Rs` / `-Rss` / `-Rn` / `-Rns` | 已实现 | libapt 标记删除；`-Rs` 用 `MarkAndSweep` 删除不再需要的自动安装包，`-Rn` 走 purge |
+| `-R` / `-Rs` / `-Rss` / `-Rn` / `-Rns` | 已实现（`-Rss` 有偏差） | libapt 标记删除；`-Rs` 只在目标的依赖闭包内用 `MarkAndSweep` 清理；`-Rss` 目前和 `-Rs` 相同，不会额外删除显式安装的依赖；`-Rn` 走 purge |
 | `-Rc` / `-Ru` / `-Rd` | 已实现 | `-Rc` 按删除后仍被满足的依赖级联；`-Ru` 先过滤仍被需要的目标；`-Rdd` 仍走 `dpkg --force-depends` |
 | `-R` 依赖保护 | 已实现 | 删除会破坏未删除包的依赖时，按 pacman 拒绝事务并打印 `removing X breaks dependency ...` |
 | `-Rp` / `--print-format` | 已实现 | `name-version` / `%n %v %r %l`；`-n` + `-p` 按 pacman 报冲突 |
@@ -58,7 +58,7 @@
 | pacman 字段 | deb 来源 | 说明 |
 |---|---|---|
 | Version | `Version` | 原样保留 `[epoch:]upstream-revision`，比较时按 dpkg 规则 |
-| Architecture | `Architecture` | `amd64` 等，不做 `x86_64` 转换 |
+| Architecture | `Architecture` | `amd64` 等；`x86_64`/`aarch64`/`i686` 会先映射成 Debian 名称 |
 | Description | `Description` 首行 | 仅 synopsis |
 | URL | `Homepage` | |
 | Licenses | `/usr/share/doc/<pkg>/copyright` 的 `License:` 行 | 取不到时为 `None` |
@@ -94,7 +94,7 @@
 
 1. `Groups` 用 `Section` 近似，`-Qg` 的「组未找到」语义随之改变
 2. deb 无 AUR、无 `--aur`、无 hooks、无 `-F` 的独立文件库（需 Contents 索引）
-3. `-Qu` 的候选版本取 apt 的 Candidate，因此受 pin/hold/phased-update 影响，和纯「sync db 最高版本」略有差异；held 包按 pacman 习惯标 `[ignored]`
+3. `-Qu` 使用 libapt 的候选版本；按设计忽略 pin/phasing，held 包标 `[ignored]`
 4. `Build Date`、`Validated By` 无对应，输出 `None` / `Unknown`
 5. `-Qo` 对目录的行为与 pacman 一致（列出所有属主），但 deb 的目录属主信息来自 `.list`，与实际目录内容无关
 6. `-S` 的组目标与 provides 目标不做展开：deb 的 group 只是 Section 近似，按组安装会牵动成百上千个包，因此按 `target not found` 处理

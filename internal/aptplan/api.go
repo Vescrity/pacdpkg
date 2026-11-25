@@ -355,6 +355,7 @@ type wireList struct {
 	Missing  []string `json:"missing"`
 	Problems []string `json:"problems"`
 	Orphans  []string `json:"orphans"`
+	Unneeded []string `json:"unneeded"`
 }
 
 // CheckDeps reports which dependency targets are not satisfied by installed
@@ -420,6 +421,9 @@ func callList(res *C.char) ([]string, error) {
 	if wire.Problems != nil {
 		return wire.Problems, nil
 	}
+	if wire.Unneeded != nil {
+		return wire.Unneeded, nil
+	}
 	return wire.Orphans, nil
 }
 
@@ -443,4 +447,93 @@ func NativeArch() (string, error) {
 		return "", fmt.Errorf("%s", wire.Error)
 	}
 	return wire.Arch, nil
+}
+
+// PolicyInfo is libapt's candidate view for one package.
+type PolicyInfo struct {
+	Name      string
+	Installed string
+	Candidate string
+	Repo      string
+	FromRepo  bool
+	Found     bool
+}
+
+type wirePolicyPkg struct {
+	Name      string `json:"name"`
+	Installed string `json:"installed"`
+	Candidate string `json:"candidate"`
+	Repo      string `json:"repo"`
+	FromRepo  bool   `json:"fromrepo"`
+	Found     bool   `json:"found"`
+}
+
+type wirePolicy struct {
+	Error    string          `json:"error"`
+	Packages []wirePolicyPkg `json:"packages"`
+}
+
+// Policy returns candidate versions from libapt for the given package names.
+func Policy(names []string) (map[string]*PolicyInfo, error) {
+	n := len(names)
+	arr := newCStringArray(n)
+	defer freeCStringArray(arr, n)
+	for i, name := range names {
+		setCString(arr, i, name)
+	}
+	q := C.AptDepQuery{ntargets: C.int(n)}
+	if n > 0 {
+		q.names = arr
+	}
+	res := C.aptplan_policy(&q)
+	if res == nil {
+		return nil, fmt.Errorf("libapt returned no response")
+	}
+	defer C.aptplan_free(res)
+	var wire wirePolicy
+	if err := json.Unmarshal([]byte(C.GoString(res)), &wire); err != nil {
+		return nil, fmt.Errorf("could not parse the libapt response: %v", err)
+	}
+	if wire.Error != "" {
+		return nil, fmt.Errorf("%s", wire.Error)
+	}
+	out := make(map[string]*PolicyInfo, len(wire.Packages))
+	for _, p := range wire.Packages {
+		out[p.Name] = &PolicyInfo{
+			Name: p.Name, Installed: p.Installed, Candidate: p.Candidate,
+			Repo: p.Repo, FromRepo: p.FromRepo, Found: p.Found,
+		}
+	}
+	return out, nil
+}
+
+// Unneeded returns the subset of installed targets that no package outside
+// the target set still requires.
+func Unneeded(names []string) ([]string, error) {
+	n := len(names)
+	arr := newCStringArray(n)
+	defer freeCStringArray(arr, n)
+	for i, name := range names {
+		setCString(arr, i, name)
+	}
+	q := C.AptDepQuery{ntargets: C.int(n)}
+	if n > 0 {
+		q.names = arr
+	}
+	return callList(C.aptplan_unneeded(&q))
+}
+
+// Configure applies --arch/--cachedir to libapt before read-only queries.
+func Configure(arch, cachedir string, architectures []string) {
+	n := len(architectures)
+	arr := newCStringArray(n)
+	defer freeCStringArray(arr, n)
+	for i, a := range architectures {
+		setCString(arr, i, a)
+	}
+	ca := C.CString(arch)
+	cc := C.CString(cachedir)
+	defer C.free(unsafe.Pointer(ca))
+	defer C.free(unsafe.Pointer(cc))
+	C.aptplan_configure(ca, cc, arr, C.int(n))
 }

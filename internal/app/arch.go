@@ -12,10 +12,8 @@ func (a *App) effectiveArch() string {
 	if a.cfg.Arch != "" && a.cfg.Arch != "auto" {
 		return deb.DebArch(a.cfg.Arch)
 	}
-	if aptplan.Available() {
-		if arch, err := aptplan.NativeArch(); err == nil && arch != "" {
-			return deb.DebArch(arch)
-		}
+	if arch, err := aptplan.NativeArch(); err == nil && arch != "" {
+		return deb.DebArch(arch)
 	}
 	return deb.NativeArch()
 }
@@ -26,6 +24,9 @@ func (a *App) effectiveArchitectures() []string {
 	}
 	out := make([]string, 0, len(a.cfg.ArchList))
 	for _, arch := range a.cfg.ArchList {
+		if arch == "" || arch == "auto" {
+			continue
+		}
 		out = append(out, deb.DebArch(arch))
 	}
 	return out

@@ -52,12 +52,13 @@ func (a *App) remove() int {
 
 	targets := explicit
 	if a.cfg.Unneeded {
-		targets = keepUnneeded(targets, func(name string) []string {
-			if p := db.Get(name); p != nil {
-				return p.RequiredBy
-			}
-			return nil
-		})
+		aptplan.Configure(a.effectiveArch(), a.cfg.CacheDir, a.effectiveArchitectures())
+		unneeded, err := aptplan.Unneeded(targets)
+		if err != nil {
+			Errorf("%v", err)
+			return 1
+		}
+		targets = unneeded
 	}
 
 	if !a.cfg.Print && a.cfg.Nodeps == 0 {
@@ -74,7 +75,7 @@ func (a *App) remove() int {
 		return 0
 	}
 
-	if aptplan.Available() && a.cfg.Nodeps == 0 {
+	if a.cfg.Nodeps == 0 {
 		var ats []aptplan.Target
 		for _, name := range targets {
 			ats = append(ats, aptplan.Target{Name: name})
@@ -100,27 +101,6 @@ func (a *App) remove() int {
 		return a.commitPlan(res.Plan, txOpts{
 			question: "Do you want to remove these packages?",
 		})
-	}
-
-	if a.cfg.Cascade {
-		targets = db.DependentClosure(targets)
-	}
-	if a.cfg.Recursive > 0 {
-		if !db.ReasonsKnown() {
-			Errorf("cannot determine install reasons; refusing to remove dependencies")
-			return 1
-		}
-		targets = db.RemovalClosure(targets, a.cfg.Recursive > 1)
-	}
-
-	if a.cfg.Nodeps == 0 && !a.cfg.Cascade {
-		if broken := brokenDeps(db, targets); len(broken) > 0 {
-			Errorf("failed to prepare transaction (could not satisfy dependencies)")
-			for _, line := range broken {
-				fmt.Fprintf(os.Stdout, ":: %s\n", line)
-			}
-			return 1
-		}
 	}
 
 	plan := &deb.Plan{}
@@ -149,66 +129,4 @@ func (a *App) warnHoldPkg(targets []string) bool {
 		}
 	}
 	return found
-}
-
-// keepUnneeded drops targets that are still required by a package outside
-// the removal set (pacman -Ru). Dropping one target can make another one
-// needed, so the targets are re-evaluated until stable.
-func keepUnneeded(targets []string, requiredBy func(string) []string) []string {
-	for {
-		inSet := make(map[string]bool, len(targets))
-		for _, t := range targets {
-			inSet[t] = true
-		}
-		var kept []string
-		for _, t := range targets {
-			needed := false
-			for _, req := range requiredBy(t) {
-				if !inSet[req] {
-					needed = true
-					break
-				}
-			}
-			if !needed {
-				kept = append(kept, t)
-			}
-		}
-		if len(kept) == len(targets) {
-			return kept
-		}
-		targets = kept
-	}
-}
-
-// brokenDeps reports removals that would break dependencies of packages
-// that stay installed; pacman refuses such transactions.
-func brokenDeps(db *deb.DB, targets []string) []string {
-	remove := make(map[string]bool, len(targets))
-	for _, t := range targets {
-		remove[t] = true
-	}
-	var out []string
-	for _, p := range db.Pkgs {
-		if remove[p.Name] {
-			continue
-		}
-		for _, dep := range p.Depends {
-			if db.DepSatisfied(dep, remove) {
-				continue
-			}
-			culprit := ""
-			for _, name := range db.DepTargets(dep) {
-				if remove[name] {
-					culprit = name
-					break
-				}
-			}
-			if culprit == "" {
-				continue
-			}
-			out = append(out, fmt.Sprintf("removing %s breaks dependency '%s' required by %s",
-				culprit, dep.String(), p.Name))
-		}
-	}
-	return out
 }

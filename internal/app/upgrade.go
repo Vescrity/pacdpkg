@@ -97,7 +97,7 @@ func (a *App) upgrade() int {
 			fmt.Fprintln(os.Stdout, "looking for conflicting packages...")
 		}
 	}
-	if aptplan.Available() && a.cfg.Nodeps == 0 {
+	if a.cfg.Nodeps == 0 {
 		var ats []aptplan.Target
 		for _, t := range targets {
 			ats = append(ats, aptplan.Target{Name: t.Name, Version: t.Version, Deb: t.DebPath})
@@ -127,25 +127,13 @@ func (a *App) upgrade() int {
 		}
 		return a.commitPlan(res.Plan, txOpts{paths: paths})
 	}
-	sync := a.loadSync()
-	if sync == nil {
-		return 1
+	plan := &deb.Plan{}
+	for _, t := range targets {
+		plan.Install = append(plan.Install, &deb.PlannedPkg{
+			Name: t.Name, NewVersion: t.Version, DebPath: t.DebPath,
+		})
 	}
-	plan, problems := sync.ResolveInstall(db, targets, false)
-	if a.reportPlanProblems(plan, problems) {
-		return 1
-	}
-	for _, p := range plan.Install {
-		if p.DebPath == "" {
-			if path, ok := paths[p.Name]; ok {
-				p.DebPath = path
-			}
-		}
-	}
-	return a.commitPlan(plan, txOpts{
-		paths:     paths,
-		forceDeps: a.cfg.Nodeps > 0,
-	})
+	return a.commitPlan(plan, txOpts{paths: paths, forceDeps: true})
 }
 
 // aptTarget makes a bare file name recognizable to apt-get, which otherwise

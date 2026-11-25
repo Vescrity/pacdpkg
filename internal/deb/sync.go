@@ -27,7 +27,6 @@ type SyncPkg struct {
 	SHA256      string
 	MD5         string
 	Description string
-	Release     *ReleaseInfo
 	Source      *SourceRepo
 
 	InstalledSize int64
@@ -65,7 +64,6 @@ func LoadSyncArch(arch string) (*Sync, error) {
 	}
 	s := &Sync{byName: map[string][]*SyncPkg{}}
 	repos := loadSourceRepos(arch)
-	releases := loadReleases()
 	seen := map[string]bool{}
 	sort.SliceStable(entries, func(i, j int) bool {
 		return listOrder(entries[i].Name(), repos) < listOrder(entries[j].Name(), repos)
@@ -88,7 +86,7 @@ func LoadSyncArch(arch string) (*Sync, error) {
 			s.Warnings = append(s.Warnings, fmt.Sprintf("could not read %s: %v", name, err))
 			continue
 		}
-		err = parsePackagesList(rc, repo, releases[base], src, s, seen)
+		err = parsePackagesList(rc, repo, src, s, seen)
 		if cerr := rc.Close(); err == nil {
 			err = cerr
 		}
@@ -164,7 +162,7 @@ func openList(path string) (io.ReadCloser, error) {
 	return fileReader{Reader: r, Closer: f}, nil
 }
 
-func parsePackagesList(r io.Reader, repo string, release *ReleaseInfo, src *SourceRepo, s *Sync, seen map[string]bool) error {
+func parsePackagesList(r io.Reader, repo string, src *SourceRepo, s *Sync, seen map[string]bool) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 1<<16), 1<<22)
 
@@ -175,7 +173,6 @@ func parsePackagesList(r io.Reader, repo string, release *ReleaseInfo, src *Sour
 			return
 		}
 		p.Repo = repo
-		p.Release = release
 		p.Source = src
 		key := repo + "|" + p.Name + "|" + p.Version
 		if !seen[key] {
@@ -268,35 +265,6 @@ func (s *Sync) Find(name, version string) *SyncPkg {
 		}
 	}
 	return nil
-}
-
-// Candidate returns the highest version of a package across repositories.
-func (s *Sync) Candidate(name string) *SyncPkg {
-	var best *SyncPkg
-	for _, p := range s.byName[name] {
-		if best == nil || alpm.CompareVersion(p.Version, best.Version) > 0 {
-			best = p
-		}
-	}
-	return best
-}
-
-// CandidateIn returns the highest version of a package within one repository,
-// or the global candidate when repo is empty.
-func (s *Sync) CandidateIn(repo, name string) *SyncPkg {
-	if repo == "" {
-		return s.Candidate(name)
-	}
-	var best *SyncPkg
-	for _, p := range s.byName[name] {
-		if p.Repo != repo {
-			continue
-		}
-		if best == nil || alpm.CompareVersion(p.Version, best.Version) > 0 {
-			best = p
-		}
-	}
-	return best
 }
 
 // Repos returns the sorted repository labels in the index.

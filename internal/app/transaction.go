@@ -50,44 +50,13 @@ func (a *App) syncTransaction() int {
 	for _, r := range repos {
 		known[r] = true
 	}
-	var targets []deb.InstallTarget
+	var ats []aptplan.Target
 	overrideHeld := false
 	for _, t := range a.targets {
 		repo, name, version := splitSyncTarget(repos, t)
 		if repo != "" && !known[repo] {
 			Errorf("database not found: %s", repo)
 			return 1
-		}
-		var cand *deb.SyncPkg
-		if version != "" {
-			cand = sync.Find(name, version)
-			if cand != nil && repo != "" && cand.Repo != repo {
-				cand = nil
-			}
-		} else {
-			cand = sync.CandidateIn(repo, name)
-		}
-		if cand == nil {
-			Errorf("target not found: %s", t)
-			return 1
-		}
-		if local := db.Get(name); local != nil {
-			switch alpm.CompareVersion(local.Version, cand.Version) {
-			case 0:
-				if a.cfg.Needed {
-					if !a.cfg.Print {
-						Warnf("%s-%s is up to date -- skipping", local.Name, local.Version)
-					}
-					continue
-				}
-				if !a.cfg.Print && !a.cfg.DownloadOnly {
-					Warnf("%s-%s is up to date -- reinstalling", local.Name, local.Version)
-				}
-			case 1:
-				if !a.cfg.Print && !a.cfg.DownloadOnly {
-					Warnf("downgrading package %s (%s => %s)", local.Name, local.Version, cand.Version)
-				}
-			}
 		}
 		if db.Held(name) {
 			overrideHeld = true
@@ -97,53 +66,43 @@ func (a *App) syncTransaction() int {
 				}
 			}
 		}
-		if a.ignored(name) || a.ignoredGroup(syncInfoPkg(cand)) {
+		if a.ignoredSyncTarget(sync, db, name) {
 			if !render.Question(name+" is in IgnorePkg/IgnoreGroup. Install anyway?", true, a.cfg.NoConfirm) {
 				return 1
 			}
 		}
-		targets = append(targets, deb.InstallTarget{Name: name, Repo: repo, Version: version})
+		ats = append(ats, aptplan.Target{Name: name, Repo: repo, Version: version})
 	}
 
 	if !a.cfg.Print {
 		fmt.Fprintln(os.Stdout, "resolving dependencies...")
 		fmt.Fprintln(os.Stdout, "looking for conflicting packages...")
 	}
-	if aptplan.Available() {
-		var ats []aptplan.Target
-		for _, t := range targets {
-			ats = append(ats, aptplan.Target{Name: t.Name, Version: t.Version, Repo: t.Repo})
-		}
-		res, err := aptplan.Resolve(aptplan.OpInstall, ats, aptplan.Options{
-			Needed:        a.cfg.Needed,
-			AsDeps:        a.cfg.AsDeps,
-			AsExplicit:    a.cfg.AsExplicit,
-			OverrideHeld:  overrideHeld,
-			Lock:          !a.cfg.Print && !a.cfg.DownloadOnly,
-			Arch:          a.effectiveArch(),
-			Cachedir:      a.cfg.CacheDir,
-			Architectures: a.effectiveArchitectures(),
-		})
-		if err != nil {
-			Errorf("%v", err)
-			return 1
-		}
-		if len(res.Problems) > 0 {
-			a.reportPlanProblems(nil, res.Problems)
-			return 1
-		}
-		enrichPlan(sync, db, res.Plan)
-		if !a.confirmRemovals(res.Plan) {
-			aptplan.Close(res.Session)
-			return 1
-		}
-		return a.commitPlan(res.Plan, txOpts{})
-	}
-	plan, problems := sync.ResolveInstall(db, targets, false)
-	if a.reportPlanProblems(plan, problems) {
+	res, err := aptplan.Resolve(aptplan.OpInstall, ats, aptplan.Options{
+		Needed:        a.cfg.Needed,
+		AsDeps:        a.cfg.AsDeps,
+		AsExplicit:    a.cfg.AsExplicit,
+		OverrideHeld:  overrideHeld,
+		Lock:          !a.cfg.Print && !a.cfg.DownloadOnly,
+		Arch:          a.effectiveArch(),
+		Cachedir:      a.cfg.CacheDir,
+		Architectures: a.effectiveArchitectures(),
+	})
+	if err != nil {
+		Errorf("%v", err)
 		return 1
 	}
-	return a.commitPlan(plan, txOpts{})
+	if len(res.Problems) > 0 {
+		a.reportPlanProblems(nil, res.Problems)
+		return 1
+	}
+	enrichPlan(sync, db, res.Plan)
+	a.warnPlanChanges(res.Plan)
+	if !a.confirmRemovals(res.Plan) {
+		aptplan.Close(res.Session)
+		return 1
+	}
+	return a.commitPlan(res.Plan, txOpts{})
 }
 
 func (a *App) syncUpgrade() int {
@@ -165,19 +124,14 @@ func (a *App) syncUpgrade() int {
 		fmt.Fprintln(os.Stdout, "resolving dependencies...")
 		fmt.Fprintln(os.Stdout, "looking for conflicting packages...")
 	}
-	var targets []deb.InstallTarget
 	var ats []aptplan.Target
-	explicit := map[string]bool{}
 	overrideHeld := false
 	if len(a.targets) > 0 {
 		repos := sync.Repos()
 		for _, t := range a.targets {
 			repo, name, version := splitSyncTarget(repos, t)
-			targets = append(targets, deb.InstallTarget{Name: name, Repo: repo, Version: version})
 			ats = append(ats, aptplan.Target{Name: name, Repo: repo, Version: version})
-			explicit[name] = true
-			if cand := sync.CandidateIn(repo, name); cand != nil &&
-				(a.ignored(name) || a.ignoredGroup(syncInfoPkg(cand))) {
+			if a.ignoredSyncTarget(sync, db, name) {
 				if !a.cfg.Print && !a.cfg.DownloadOnly &&
 					!render.Question(name+" is in IgnorePkg/IgnoreGroup. Install anyway?", true, a.cfg.NoConfirm) {
 					return 1
@@ -192,76 +146,28 @@ func (a *App) syncUpgrade() int {
 			}
 		}
 	}
-	if !a.cfg.Print {
-		for _, p := range db.Pkgs {
-			if explicit[p.Name] {
-				continue
-			}
-			cand := sync.CandidateIn("", p.Name)
-			if cand == nil || alpm.CompareVersion(cand.Version, p.Version) <= 0 {
-				continue
-			}
-			if a.ignored(p.Name) || a.ignoredGroup(p) {
-				Warnf("%s: ignoring package upgrade (%s => %s)", p.Name, p.Version, cand.Version)
-			} else if db.Held(p.Name) {
-				Warnf("%s: ignoring package upgrade (held)", p.Name)
-			}
-		}
-	}
-	if aptplan.Available() {
-		res, err := aptplan.Resolve(aptplan.OpUpgrade, ats, aptplan.Options{
-			Downgrade:     a.cfg.SysUpgrade > 1,
-			Needed:        a.cfg.Needed,
-			OverrideHeld:  overrideHeld,
-			IgnorePkgs:    append(append([]string{}, a.cfg.IgnorePkg...), a.conf.IgnorePkg...),
-			IgnoreGroups:  append(append([]string{}, a.cfg.IgnoreGroup...), a.conf.IgnoreGroup...),
-			Lock:          !a.cfg.Print && !a.cfg.DownloadOnly,
-			Arch:          a.effectiveArch(),
-			Cachedir:      a.cfg.CacheDir,
-			Architectures: a.effectiveArchitectures(),
-		})
-		if err != nil {
-			Errorf("%v", err)
-			return 1
-		}
-		if len(res.Problems) > 0 {
-			a.reportPlanProblems(nil, res.Problems)
-			return 1
-		}
-		enrichPlan(sync, db, res.Plan)
-		return a.commitPlan(res.Plan, txOpts{})
-	}
-	plan, problems := sync.ResolveInstall(db, targets, true)
-	if a.reportPlanProblems(plan, problems) {
+	res, err := aptplan.Resolve(aptplan.OpUpgrade, ats, aptplan.Options{
+		Downgrade:     a.cfg.SysUpgrade > 1,
+		Needed:        a.cfg.Needed,
+		OverrideHeld:  overrideHeld,
+		IgnorePkgs:    append(append([]string{}, a.cfg.IgnorePkg...), a.conf.IgnorePkg...),
+		IgnoreGroups:  append(append([]string{}, a.cfg.IgnoreGroup...), a.conf.IgnoreGroup...),
+		Lock:          !a.cfg.Print && !a.cfg.DownloadOnly,
+		Arch:          a.effectiveArch(),
+		Cachedir:      a.cfg.CacheDir,
+		Architectures: a.effectiveArchitectures(),
+	})
+	if err != nil {
+		Errorf("%v", err)
 		return 1
 	}
-
-	var kept []*deb.PlannedPkg
-	dropped := map[string]bool{}
-	for _, p := range plan.Install {
-		if p.OldVersion != "" && (a.ignored(p.Name) || a.ignoredGroup(syncInfoPkg(p.Sync))) {
-			Warnf("%s: ignoring package upgrade (%s => %s)", p.Name, p.OldVersion, p.NewVersion)
-			dropped[p.Name] = true
-			continue
-		}
-		kept = append(kept, p)
+	if len(res.Problems) > 0 {
+		a.reportPlanProblems(nil, res.Problems)
+		return 1
 	}
-	plan.Install = kept
-	for _, p := range kept {
-		if p.Sync == nil {
-			continue
-		}
-		for _, dep := range append(append([]alpm.Dep{}, p.Sync.Depends...), p.Sync.PreDepends...) {
-			for _, alt := range dep.Alts {
-				if dropped[alt.Name] {
-					Errorf("cannot resolve dependency '%s' required by '%s' (ignored package)",
-						dep.String(), p.Name)
-					return 1
-				}
-			}
-		}
-	}
-	return a.commitPlan(plan, txOpts{})
+	enrichPlan(sync, db, res.Plan)
+	a.warnPlanChanges(res.Plan)
+	return a.commitPlan(res.Plan, txOpts{})
 }
 
 func (a *App) reportPlanProblems(plan *deb.Plan, problems []string) bool {
@@ -685,7 +591,17 @@ func enrichPlan(sync *deb.Sync, db *deb.DB, plan *deb.Plan) {
 		if p.DebPath != "" {
 			continue
 		}
-		sp := sync.Find(p.Name, p.NewVersion)
+		var sp *deb.SyncPkg
+		for _, cand := range sync.Lookup(p.Name) {
+			if cand.Version != p.NewVersion {
+				continue
+			}
+			if p.Repo != "" && cand.Repo != p.Repo {
+				continue
+			}
+			sp = cand
+			break
+		}
 		if sp == nil {
 			continue
 		}
@@ -705,6 +621,36 @@ func enrichPlan(sync *deb.Sync, db *deb.DB, plan *deb.Plan) {
 		}
 		if sp.Source != nil && sp.Filename != "" {
 			p.URL = sp.Source.PackageURL(sp.Filename)
+		}
+	}
+}
+
+func (a *App) ignoredSyncTarget(sync *deb.Sync, db *deb.DB, name string) bool {
+	if a.ignored(name) {
+		return true
+	}
+	if p := db.Get(name); p != nil {
+		return a.ignoredGroup(p)
+	}
+	for _, p := range sync.Lookup(name) {
+		if a.ignoredGroup(syncInfoPkg(p)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) warnPlanChanges(plan *deb.Plan) {
+	if a.cfg.Print || a.cfg.DownloadOnly {
+		return
+	}
+	for _, p := range plan.Install {
+		if p.Reinstall && p.OldVersion != "" {
+			Warnf("%s-%s is up to date -- reinstalling", p.Name, p.OldVersion)
+		}
+		if p.OldVersion != "" && p.NewVersion != "" &&
+			alpm.CompareVersion(p.NewVersion, p.OldVersion) < 0 {
+			Warnf("downgrading package %s (%s => %s)", p.Name, p.OldVersion, p.NewVersion)
 		}
 	}
 }

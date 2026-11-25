@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <fnmatch.h>
 #include <map>
+#include <set>
 #include <sstream>
 
 struct AptSession {
@@ -313,18 +314,6 @@ char *dupJSON(const std::string &s) {
 
 bool openCache(AptSession *s, const AptRequest *req) {
    s->CF = new pkgCacheFile();
-   if (!s->CF->BuildSourceList())
-      return false;
-   for (int i = 0; i < req->ntargets; ++i) {
-      const char *deb = req->debs == nullptr ? nullptr : req->debs[i];
-      if (deb == nullptr || deb[0] == '\0')
-         continue;
-      if (!s->CF->GetSourceList()->AddVolatileFile(deb, nullptr))
-         return false;
-      const char *name = req->names[i];
-      if (name != nullptr)
-         s->localByPkg[name] = deb;
-   }
    bool lock = (req->flags & APT_FLAG_LOCK) != 0;
    _config->Set("APT::Ignore-Hold", (req->flags & APT_FLAG_OVERRIDE_HELD) != 0 ? "true" : "false");
    if (req->arch != nullptr && req->arch[0] != '\0')
@@ -337,6 +326,18 @@ bool openCache(AptSession *s, const AptRequest *req) {
    }
    if (req->cachedir != nullptr && req->cachedir[0] != '\0')
       _config->Set("Dir::Cache::archives", req->cachedir);
+   if (!s->CF->BuildSourceList())
+      return false;
+   for (int i = 0; i < req->ntargets; ++i) {
+      const char *deb = req->debs == nullptr ? nullptr : req->debs[i];
+      if (deb == nullptr || deb[0] == '\0')
+         continue;
+      if (!s->CF->GetSourceList()->AddVolatileFile(deb, nullptr))
+         return false;
+      const char *name = req->names[i];
+      if (name != nullptr)
+         s->localByPkg[name] = deb;
+   }
    s->lock = lock;
    if (!s->CF->BuildCaches(nullptr, lock))
       return false;
@@ -545,9 +546,37 @@ bool doRemove(AptSession *s, const AptRequest *req, std::vector<std::string> &pr
       }
    }
    if (recursive) {
+      std::set<std::string> closure;
+      std::vector<pkgCache::PkgIterator> queue;
+      for (pkgCache::PkgIterator P = C.PkgBegin(); !P.end(); ++P)
+         if (D[P].Delete() && !P.CurrentVer().end())
+            queue.push_back(P);
+      for (size_t head = 0; head < queue.size(); ++head) {
+         pkgCache::PkgIterator P = queue[head];
+         pkgCache::VerIterator V = P.CurrentVer();
+         if (V.end())
+            continue;
+         for (pkgCache::DepIterator Dep = V.DependsList(); !Dep.end(); ++Dep) {
+            if (Dep->Type != pkgCache::Dep::Depends && Dep->Type != pkgCache::Dep::PreDepends)
+               continue;
+            pkgCache::PkgIterator T = Dep.TargetPkg();
+            std::vector<pkgCache::PkgIterator> providers;
+            if (!T.end()) {
+               providers.push_back(T);
+               for (pkgCache::PrvIterator Prv = T.ProvidesList(); !Prv.end(); ++Prv)
+                  providers.push_back(Prv.OwnerPkg());
+            }
+            for (auto Q : providers) {
+               if (Q.end() || Q.CurrentVer().end() || closure.count(Q.Name()) != 0)
+                  continue;
+               closure.insert(Q.Name());
+               queue.push_back(Q);
+            }
+         }
+      }
       D.MarkAndSweep();
       for (pkgCache::PkgIterator P = C.PkgBegin(); !P.end(); ++P)
-         if (D[P].Garbage && !P.CurrentVer().end() && !D[P].Delete())
+         if (D[P].Garbage && closure.count(P.Name()) != 0 && !D[P].Delete())
             D.MarkDelete(P, purge);
    }
    if (cascade) {
@@ -843,6 +872,111 @@ char *aptplan_nativearch(void) {
    return dupJSON(o.str());
 }
 
+void aptplan_configure(const char *arch, const char *cachedir,
+                       const char **architectures, int narchitectures) {
+   if (!ensureInit())
+      return;
+   if (arch != nullptr && arch[0] != '\0')
+      _config->Set("APT::Architecture", arch);
+   if (narchitectures > 0) {
+      _config->Clear("APT::Architectures");
+      for (int i = 0; i < narchitectures; ++i)
+         if (architectures != nullptr && architectures[i] != nullptr && architectures[i][0] != '\0')
+            _config->Set("APT::Architectures::", architectures[i]);
+   }
+   if (cachedir != nullptr && cachedir[0] != '\0')
+      _config->Set("Dir::Cache::archives", cachedir);
+}
+
+char *aptplan_unneeded(const AptDepQuery *q) {
+   if (q == nullptr)
+      return dupJSON("{\"error\":\"invalid query\"}");
+   if (!ensureInit())
+      return dupJSON("{\"error\":\"could not initialize libapt\"}");
+   _error->Discard();
+   pkgCacheFile CF;
+   if (!CF.ReadOnlyOpen())
+      return dupJSON("{\"error\":" + jsonEscape(errorsToString()) + "}");
+   pkgCache &C = *CF.GetPkgCache();
+   pkgDepCache &D = *CF.GetDepCache();
+   std::set<std::string> targets;
+   for (int i = 0; i < q->ntargets; ++i)
+      if (q->names != nullptr && q->names[i] != nullptr)
+         targets.insert(q->names[i]);
+   std::set<std::string> baseline;
+   for (pkgCache::PkgIterator P = C.PkgBegin(); !P.end(); ++P)
+      if (D[P].InstBroken())
+         baseline.insert(P.Name());
+   std::vector<std::string> out;
+   for (int i = 0; i < q->ntargets; ++i) {
+      const char *name = q->names == nullptr ? nullptr : q->names[i];
+      if (name == nullptr || name[0] == '\0')
+         continue;
+      pkgCache::PkgIterator P = findPkg(C, name);
+      if (P.end() || P.CurrentVer().end())
+         continue;
+      D.MarkDelete(P, false, true);
+      bool needed = false;
+      for (pkgCache::PkgIterator Q = C.PkgBegin(); !Q.end(); ++Q) {
+         if (Q.CurrentVer().end() || targets.count(Q.Name()) != 0)
+            continue;
+         if (baseline.count(Q.Name()) != 0)
+            continue;
+         if (D[Q].InstBroken()) {
+            needed = true;
+            break;
+         }
+      }
+      D.MarkKeep(P, false, true);
+      if (!needed)
+         out.push_back(name);
+   }
+   return dupJSON(listJSON("unneeded", out));
+}
+
+char *aptplan_policy(const AptDepQuery *q) {
+   if (q == nullptr)
+      return dupJSON("{\"error\":\"invalid query\"}");
+   if (!ensureInit())
+      return dupJSON("{\"error\":\"could not initialize libapt\"}");
+   _error->Discard();
+   pkgCacheFile CF;
+   if (!CF.ReadOnlyOpen())
+      return dupJSON("{\"error\":" + jsonEscape(errorsToString()) + "}");
+   pkgCache &C = *CF.GetPkgCache();
+   pkgDepCache &D = *CF.GetDepCache();
+   selectAllCandidates(C, D);
+   std::ostringstream o;
+   o << "{\"packages\":[";
+   for (int i = 0; i < q->ntargets; ++i) {
+      if (i)
+         o << ",";
+      const char *name = q->names == nullptr ? nullptr : q->names[i];
+      pkgCache::PkgIterator P = name == nullptr ? pkgCache::PkgIterator(C) : findPkg(C, name);
+      std::string installed;
+      std::string candidate;
+      std::string repo;
+      bool fromRepo = false;
+      if (!P.end()) {
+         installed = verStr(P.CurrentVer());
+         pkgCache::VerIterator V = D.GetCandidateVersion(P);
+         candidate = verStr(V);
+         if (!V.end() && hasRepoFile(V)) {
+            fromRepo = true;
+            repo = repoLabel(V);
+         }
+      }
+      o << "{\"name\":" << jsonEscape(name == nullptr ? "" : name)
+        << ",\"installed\":" << jsonEscape(installed)
+        << ",\"candidate\":" << jsonEscape(candidate)
+        << ",\"repo\":" << jsonEscape(repo)
+        << ",\"fromrepo\":" << (fromRepo ? "true" : "false")
+        << ",\"found\":" << (P.end() ? "false" : "true") << "}";
+   }
+   o << "]}";
+   return dupJSON(o.str());
+}
+
 char *aptplan_checkdeps(const AptDepQuery *q) {
    if (q == nullptr)
       return dupJSON("{\"error\":\"invalid query\"}");
@@ -962,6 +1096,32 @@ void aptplan_close(AptSession *session) {
 }
 
 char *aptplan_nativearch(void) {
+   const char *msg = "{\"error\":\"pacdpkg was built without libapt support\"}";
+   char *p = static_cast<char *>(std::malloc(std::strlen(msg) + 1));
+   if (p != nullptr)
+      std::memcpy(p, msg, std::strlen(msg) + 1);
+   return p;
+}
+
+void aptplan_configure(const char *arch, const char *cachedir,
+                       const char **architectures, int narchitectures) {
+   (void) arch;
+   (void) cachedir;
+   (void) architectures;
+   (void) narchitectures;
+}
+
+char *aptplan_unneeded(const AptDepQuery *q) {
+   (void) q;
+   const char *msg = "{\"error\":\"pacdpkg was built without libapt support\"}";
+   char *p = static_cast<char *>(std::malloc(std::strlen(msg) + 1));
+   if (p != nullptr)
+      std::memcpy(p, msg, std::strlen(msg) + 1);
+   return p;
+}
+
+char *aptplan_policy(const AptDepQuery *q) {
+   (void) q;
    const char *msg = "{\"error\":\"pacdpkg was built without libapt support\"}";
    char *p = static_cast<char *>(std::malloc(std::strlen(msg) + 1));
    if (p != nullptr)

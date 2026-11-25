@@ -61,6 +61,10 @@ char *aptplan_checkdeps(const AptDepQuery *q);
 char *aptplan_checkdb(void);
 char *aptplan_orphans(int ignore_optdeps);
 char *aptplan_nativearch(void);
+char *aptplan_policy(const AptDepQuery *q);
+char *aptplan_unneeded(const AptDepQuery *q);
+void aptplan_configure(const char *arch, const char *cachedir,
+                       const char **architectures, int narchitectures);
 
 #ifdef __cplusplus
 }

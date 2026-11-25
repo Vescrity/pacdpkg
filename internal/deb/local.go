@@ -102,6 +102,12 @@ func (db *DB) EnsureReasons() {
 		return
 	}
 	db.reasonsLoaded = true
+	for _, p := range db.Pkgs {
+		if p.StateWant == "hold" {
+			db.held[p.Name] = true
+			db.held[p.Binary] = true
+		}
+	}
 	if _, err := os.Stat(extStates); err != nil {
 		return
 	}
@@ -110,10 +116,6 @@ func (db *DB) EnsureReasons() {
 	for _, p := range db.Pkgs {
 		p.Explicit = !auto[p.Name] && !auto[p.Binary]
 		p.ReasonKnown = true
-		if p.StateWant == "hold" {
-			db.held[p.Name] = true
-			db.held[p.Binary] = true
-		}
 	}
 }
 

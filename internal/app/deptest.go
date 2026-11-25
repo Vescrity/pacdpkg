@@ -6,42 +6,25 @@ import (
 	"strings"
 
 	"pacdpkg/internal/aptplan"
-	"pacdpkg/internal/deb"
 )
 
 // deptest implements -T: print unsatisfied dependencies and exit 127.
 func (a *App) deptest() int {
-	db, err := deb.Open()
-	if err != nil {
-		Errorf("could not read the dpkg database: %v", err)
-		return 1
-	}
-	missing := 0
-	if aptplan.Available() {
-		specs := make([]aptplan.DepSpec, 0, len(a.targets))
-		for _, t := range a.targets {
-			name, op, ver := parseConstraint(t)
-			specs = append(specs, aptplan.DepSpec{Name: name, Op: op, Version: ver})
-		}
-		unsatisfied, err := aptplan.CheckDeps(specs)
-		if err == nil {
-			for _, t := range unsatisfied {
-				fmt.Fprintln(os.Stdout, t)
-			}
-			if len(unsatisfied) > 0 {
-				return 127
-			}
-			return 0
-		}
-	}
+	specs := make([]aptplan.DepSpec, 0, len(a.targets))
 	for _, t := range a.targets {
 		name, op, ver := parseConstraint(t)
-		if !db.Satisfies(name, op, ver) {
-			fmt.Fprintln(os.Stdout, t)
-			missing++
-		}
+		specs = append(specs, aptplan.DepSpec{Name: name, Op: op, Version: ver})
 	}
-	if missing > 0 {
+	aptplan.Configure(a.effectiveArch(), a.cfg.CacheDir, a.effectiveArchitectures())
+	unsatisfied, err := aptplan.CheckDeps(specs)
+	if err != nil {
+		Errorf("%v", err)
+		return 1
+	}
+	for _, t := range unsatisfied {
+		fmt.Fprintln(os.Stdout, t)
+	}
+	if len(unsatisfied) > 0 {
 		return 127
 	}
 	return 0

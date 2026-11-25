@@ -8,20 +8,18 @@
 ## 构建与安装
 
 ```sh
-apt-get install libapt-pkg-dev   # 只在构建 libapt 版本时需要
-make build                       # 检测到 apt 头文件时自动带 -tags libapt
+apt-get install libapt-pkg-dev
+make build
 make test
 make install                     # 安装到 /usr/local，含补全脚本
 ```
 
-`make build` 在没有 apt 头文件的机器上（例如 Arch）构建不链接 libapt 的版本，
-事务会退回内置的 Go 求解器，只适合开发和查询验证。Debian 系上装上
-`libapt-pkg-dev` 后会默认链接 `libapt-pkg`；需要显式关闭时用 `make build TAGS=`。
+构建、运行和事务都依赖 `libapt-pkg` 和 `dpkg`，只能在 Debian 系系统上完成；
+没有 libapt 的开发机不能构建或运行事务。
 
 `make install` 支持 `PREFIX`、`DATADIR`、`BASH_COMPDIR`、`ZSH_COMPDIR`，
-打包时按发行版布局覆盖即可。链接 libapt 后不是静态二进制，运行时依赖
-`libapt-pkg6.0`、`libstdc++6` 和 `libc6`；交叉编译需要在目标架构的
-sysroot/容器里进行，不再提供裸 `make cross`。
+打包时按发行版布局覆盖即可。运行时依赖 `libapt-pkg6.0`、`libstdc++6` 和 `libc6`；交叉编译需要在目标架构的
+sysroot/容器里进行。
 
 ## 用法
 
@@ -87,10 +85,9 @@ dpkg 与 apt 的数据文件或归档（`/var/lib/dpkg/status`、`/var/lib/dpkg/
 `/var/lib/apt/extended_states`、`/var/lib/apt/lists`、`sources.list`、
 deb 的 ar/tar），压缩的仓库列表在进程内解压，不解析命令输出。
 
-事务计划由 `libapt-pkg` 的 `pkgDepCache` / `pkgProblemResolver` 计算，
-执行用同一份 depcache 走 `pkgPackageManager` / `pkgDPkgPM`，计划和实际执行
-不会二次求解。构建时若没有 libapt 头文件，则退回到内置的 Go 求解器，仅供
-查询和开发使用。
+事务计划和依赖查询都由 `libapt-pkg` 的 `pkgDepCache` / `pkgProblemResolver`
+计算，执行用同一份 depcache 走 `pkgPackageManager` / `pkgDPkgPM`，计划和实际
+执行不会二次求解。Go 侧只保留 dpkg 文件、`.deb` 和 Contents 的读取。
 
 ## 与 pacman 的差异
 

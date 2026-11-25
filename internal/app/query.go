@@ -374,21 +374,22 @@ type queryState struct {
 func (a *App) filterSet(db *deb.DB) (*queryState, error) {
 	cfg := a.cfg
 	needRepo := cfg.Foreign || cfg.Native || cfg.Upgrades
-	var repo map[string]*deb.Policy
+	var repo map[string]*aptplan.PolicyInfo
 	if needRepo {
-		sync := a.loadSync()
-		if sync == nil {
-			return nil, fmt.Errorf("could not read the package lists")
-		}
 		names := make([]string, 0, len(db.Pkgs))
 		for _, p := range db.Pkgs {
 			names = append(names, p.Name)
 		}
-		repo = sync.Policies(db, names)
+		aptplan.Configure(a.effectiveArch(), a.cfg.CacheDir, a.effectiveArchitectures())
+		var err error
+		repo, err = aptplan.Policy(names)
+		if err != nil {
+			return nil, fmt.Errorf("could not read the package lists: %v", err)
+		}
 	}
 	var unreq map[string]bool
 	if cfg.Unrequired > 0 {
-		set, err := unrequiredSet(db, cfg.Unrequired)
+		set, err := unrequiredSet(db, cfg.Unrequired, a.effectiveArch(), a.cfg.CacheDir, a.effectiveArchitectures())
 		if err != nil {
 			return nil, err
 		}
@@ -398,7 +399,9 @@ func (a *App) filterSet(db *deb.DB) (*queryState, error) {
 		return nil, nil
 	}
 	if cfg.Deps || cfg.Explicit {
-		db.EnsureReasons()
+		if !db.ReasonsKnown() {
+			return nil, fmt.Errorf("could not read install reasons")
+		}
 	}
 	st := &queryState{allowed: map[string]bool{}, candidate: map[string]string{}}
 	for _, p := range db.Pkgs {
@@ -434,24 +437,9 @@ func (a *App) filterSet(db *deb.DB) (*queryState, error) {
 	return st, nil
 }
 
-func unrequiredSet(db *deb.DB, level int) (map[string]bool, error) {
-	if aptplan.Available() {
-		if set, err := aptplan.Orphans(level > 1); err == nil {
-			return set, nil
-		}
-	}
-	db.EnsureReasons()
-	set := map[string]bool{}
-	for _, p := range db.Pkgs {
-		if p.Explicit || len(p.RequiredBy) > 0 {
-			continue
-		}
-		if level < 2 && len(p.OptionalFor) > 0 {
-			continue
-		}
-		set[p.Name] = true
-	}
-	return set, nil
+func unrequiredSet(db *deb.DB, level int, arch, cachedir string, archs []string) (map[string]bool, error) {
+	aptplan.Configure(arch, cachedir, archs)
+	return aptplan.Orphans(level > 1)
 }
 
 func (a *App) display(db *deb.DB, p *alpm.Pkg, st *queryState) bool {
