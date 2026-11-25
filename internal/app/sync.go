@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -83,14 +82,14 @@ func (a *App) syncSearch() int {
 		return 1
 	}
 
-	var patterns []*regexp.Regexp
+	var patterns []searchPattern
+	invalid := false
 	for _, t := range a.targets {
-		re, err := regexp.Compile("(?i)" + t)
-		if err != nil {
-			Errorf("invalid regular expression '%s'", t)
-			return 1
+		pat := compileSearch(t)
+		if pat.invalid {
+			invalid = true
 		}
-		patterns = append(patterns, re)
+		patterns = append(patterns, pat)
 	}
 
 	found := false
@@ -108,27 +107,30 @@ func (a *App) syncSearch() int {
 		found = true
 	}
 	if !found {
+		if invalid {
+			Errorf("search failed: invalid regular expression")
+		}
 		return 1
 	}
 	return 0
 }
 
-func matchesSync(patterns []*regexp.Regexp, p *deb.SyncPkg) bool {
-	for _, re := range patterns {
-		if !matchSyncPattern(re, p) {
+func matchesSync(patterns []searchPattern, p *deb.SyncPkg) bool {
+	for _, pat := range patterns {
+		if !matchSyncPattern(pat, p) {
 			return false
 		}
 	}
 	return true
 }
 
-func matchSyncPattern(re *regexp.Regexp, p *deb.SyncPkg) bool {
-	if re.MatchString(p.Name) || re.MatchString(p.Description) || re.MatchString(p.Section) {
+func matchSyncPattern(pat searchPattern, p *deb.SyncPkg) bool {
+	if pat.match(p.Name) || pat.match(p.Description) || pat.match(p.Section) {
 		return true
 	}
 	for _, prov := range p.Provides {
 		for _, alt := range prov.Alts {
-			if re.MatchString(alt.Name) {
+			if pat.match(alt.Name) {
 				return true
 			}
 		}

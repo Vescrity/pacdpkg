@@ -51,14 +51,14 @@ func (a *App) query() int {
 }
 
 func (a *App) querySearch(db *deb.DB) int {
-	var res []*regexp.Regexp
+	var res []searchPattern
+	invalid := false
 	for _, t := range a.targets {
-		re, err := regexp.Compile("(?i)" + t)
-		if err != nil {
-			Errorf("invalid regular expression '%s'", t)
-			return 1
+		pat := compileSearch(t)
+		if pat.invalid {
+			invalid = true
 		}
-		res = append(res, re)
+		res = append(res, pat)
 	}
 	match := false
 	for _, p := range db.Pkgs {
@@ -69,32 +69,96 @@ func (a *App) querySearch(db *deb.DB) int {
 		match = true
 	}
 	if !match {
+		if invalid {
+			Errorf("search failed: invalid regular expression")
+		}
 		return 1
 	}
 	return 0
 }
 
-func searchMatches(res []*regexp.Regexp, p *alpm.Pkg) bool {
-	for _, re := range res {
-		if !matchPattern(re, p) {
+type searchPattern struct {
+	re      *regexp.Regexp
+	literal string
+	invalid bool
+}
+
+func compileSearch(t string) searchPattern {
+	re, err := regexp.Compile("(?i)" + t)
+	if err == nil {
+		return searchPattern{re: re}
+	}
+	if literalFallback(t) {
+		return searchPattern{literal: t}
+	}
+	return searchPattern{invalid: true}
+}
+
+// literalFallback keeps patterns like libsigc++ searchable even though Go's
+// RE2 rejects the repeated quantifier. Unbalanced brackets or parentheses
+// stay invalid, matching pacman's error for patterns such as "[".
+func literalFallback(t string) bool {
+	if t == "" || strings.ContainsAny(t[:1], "*+?{") {
+		return false
+	}
+	brackets, parens := 0, 0
+	escaped := false
+	for _, r := range t {
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch r {
+		case '\\':
+			escaped = true
+		case '[':
+			brackets++
+		case ']':
+			if brackets > 0 {
+				brackets--
+			}
+		case '(':
+			parens++
+		case ')':
+			if parens > 0 {
+				parens--
+			}
+		}
+	}
+	return !escaped && brackets == 0 && parens == 0
+}
+
+func (p searchPattern) match(s string) bool {
+	if p.re != nil {
+		return p.re.MatchString(s)
+	}
+	if p.invalid {
+		return false
+	}
+	return strings.Contains(strings.ToLower(s), strings.ToLower(p.literal))
+}
+
+func searchMatches(res []searchPattern, p *alpm.Pkg) bool {
+	for _, pat := range res {
+		if !matchPattern(pat, p) {
 			return false
 		}
 	}
 	return true
 }
 
-func matchPattern(re *regexp.Regexp, p *alpm.Pkg) bool {
-	if re.MatchString(p.Name) || re.MatchString(p.Description) {
+func matchPattern(pat searchPattern, p *alpm.Pkg) bool {
+	if pat.match(p.Name) || pat.match(p.Description) {
 		return true
 	}
 	for _, g := range p.Groups {
-		if re.MatchString(g) {
+		if pat.match(g) {
 			return true
 		}
 	}
 	for _, prov := range p.Provides {
 		for _, alt := range prov.Alts {
-			if re.MatchString(alt.Name) {
+			if pat.match(alt.Name) {
 				return true
 			}
 		}
