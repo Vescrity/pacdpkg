@@ -288,6 +288,9 @@ func (c *Config) checkTransArgs() error {
 }
 
 func (c *Config) checkSyncArgs() error {
+	if err := c.checkTransArgs(); err != nil {
+		return err
+	}
 	if err := invalidOpt(c.AsDeps && c.AsExplicit, "--asdeps", "--asexplicit"); err != nil {
 		return err
 	}

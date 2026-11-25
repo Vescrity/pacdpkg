@@ -275,11 +275,12 @@ func (a *App) queryPackages(db *deb.DB) int {
 		return 1
 	}
 	for _, t := range a.targets {
-		p := db.Get(t)
+		name := strings.TrimPrefix(t, "local/")
+		p := db.Get(name)
 		if p == nil {
-			Errorf("package '%s' was not found", t)
-			if _, err := os.Stat(t); err == nil {
-				Warnf("'%s' is a file, you might want to use -p/--file.", t)
+			Errorf("package '%s' was not found", name)
+			if _, err := os.Stat(name); err == nil {
+				Warnf("'%s' is a file, you might want to use -p/--file.", name)
 			}
 			ret = 1
 			continue
