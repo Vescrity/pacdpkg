@@ -78,7 +78,7 @@ type Config struct {
 }
 
 // Apply interprets one option token for the selected operation.
-func (c *Config) Apply(d *OptDef, arg string) error {
+func (c *Config) Apply(d *OptDef, arg string, hasArg bool) error {
 	switch d.Key {
 	case "help":
 		c.Help = true
@@ -125,7 +125,7 @@ func (c *Config) Apply(d *OptDef, arg string) error {
 	case "noconfirm":
 		c.NoConfirm = true
 	case "debug":
-		if arg != "" {
+		if arg != "" || hasArg {
 			level, err := strconv.Atoi(arg)
 			if err != nil || (level != 1 && level != 2) {
 				return fmt.Errorf("'%s' is not a valid debug level", arg)

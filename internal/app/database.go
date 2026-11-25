@@ -19,8 +19,11 @@ func (a *App) database() int {
 		return a.checkLocalDB()
 	}
 	if len(a.targets) == 0 {
-		Errorf("no targets specified (use -h for help)")
-		return 1
+		if cfg.AsDeps || cfg.AsExplicit {
+			Errorf("no targets specified (use -h for help)")
+			return 1
+		}
+		return 0
 	}
 	if !cfg.AsDeps && !cfg.AsExplicit {
 		Errorf("no install reason specified (use -h for help)")

@@ -724,6 +724,15 @@ std::string listJSON(const char *key, const std::vector<std::string> &items) {
    return o.str();
 }
 
+struct ManualRootSet : pkgDepCache::InRootSetFunc {
+   pkgDepCache &D;
+   explicit ManualRootSet(pkgDepCache &d) : D(d) {}
+   bool InRootSet(const pkgCache::PkgIterator &P) override {
+      return P.end() == false && P.CurrentVer().end() == false &&
+             (D[P].Flags & pkgCache::Flag::Auto) == 0;
+   }
+};
+
 } // namespace
 
 extern "C" {
@@ -886,7 +895,8 @@ char *aptplan_orphans(int ignore_optdeps) {
    if (ok) {
       pkgCache &C = *CF.GetPkgCache();
       pkgDepCache &D = *CF.GetDepCache();
-      D.MarkAndSweep();
+      ManualRootSet roots(D);
+      D.MarkAndSweep(roots);
       for (pkgCache::PkgIterator P = C.PkgBegin(); !P.end(); ++P)
          if (!P.CurrentVer().end() && D[P].Garbage)
             orphans.push_back(P.Name());

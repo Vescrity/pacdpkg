@@ -9,9 +9,10 @@ import (
 // definition that matches the token; which one applies depends on the
 // operation, so resolution happens after the operation is known.
 type Token struct {
-	Defs []*OptDef
-	Arg  string
-	Raw  string
+	Defs   []*OptDef
+	Arg    string
+	Raw    string
+	HasArg bool
 }
 
 // For returns the definition valid for op, or nil.
@@ -80,7 +81,7 @@ func Parse(prog string, args []string) ([]Token, []string, error) {
 					val = args[i]
 				}
 			}
-			tokens = append(tokens, Token{Defs: defs, Arg: val, Raw: "--" + name})
+			tokens = append(tokens, Token{Defs: defs, Arg: val, Raw: "--" + name, HasArg: hasVal})
 
 		case len(a) > 1 && a[0] == '-':
 			cluster := a[1:]

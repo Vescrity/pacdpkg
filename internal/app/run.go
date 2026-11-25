@@ -93,7 +93,7 @@ func Run(argv []string) int {
 			Errorf("invalid option '%s'", raw)
 			return 1
 		}
-		if err := cfg.Apply(def, t.Arg); err != nil {
+		if err := cfg.Apply(def, t.Arg, t.HasArg); err != nil {
 			Errorf("%s", err)
 			return 1
 		}

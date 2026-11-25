@@ -18,7 +18,7 @@ func TestApplyValidatesArguments(t *testing.T) {
 	}
 	for _, c := range cases {
 		cfg := &Config{}
-		err := cfg.Apply(&OptDef{Key: c.key}, c.arg)
+		err := cfg.Apply(&OptDef{Key: c.key}, c.arg, false)
 		if c.want == "" {
 			if err != nil {
 				t.Errorf("%s=%q: unexpected error %v", c.key, c.arg, err)
@@ -33,11 +33,11 @@ func TestApplyValidatesArguments(t *testing.T) {
 
 func TestConfirmLastWins(t *testing.T) {
 	cfg := &Config{}
-	cfg.Apply(&OptDef{Key: "noconfirm"}, "")
+	cfg.Apply(&OptDef{Key: "noconfirm"}, "", false)
 	if !cfg.NoConfirm {
 		t.Fatal("noconfirm not set")
 	}
-	cfg.Apply(&OptDef{Key: "confirm"}, "")
+	cfg.Apply(&OptDef{Key: "confirm"}, "", false)
 	if cfg.NoConfirm {
 		t.Fatal("confirm did not clear noconfirm")
 	}
