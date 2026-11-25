@@ -36,7 +36,7 @@
 | `--dbonly` / `--noscriptlet` / `--assume-installed` / `--overwrite` | 明确拒绝 | deb 后端无等价语义（dpkg 只能全局覆盖，无法按路径限定），直接报错而不是静默降级 |
 | `--nodeps` | 按操作映射 | `-R` 用 `dpkg -r --force-depends`（apt 会连带删依赖者），`-U` 对纯本地包用 `dpkg -i --force-depends`；`-S` 无等价语义，报错 |
 | `--root` / `--dbpath` / `--sysroot` | 明确拒绝 | 会改变操作的数据库根，静默忽略不安全 |
-| `--cachedir` / `--arch` / `--config` / `--noconfirm` / `--confirm` / `-v` | 已映射 | `-o Dir::Cache::archives` / `-o APT::Architecture` / pacdpkg.conf 方言 / 单布尔三态 / 配置横幅 |
+| `--cachedir` / `--arch` / `--config` / `--noconfirm` / `--confirm` / `-v` | 已映射 | libapt 的 `Dir::Cache::archives`、`APT::Architecture`/`APT::Architectures` / pacdpkg.conf 方言 / 单布尔三态 / 配置横幅 |
 | `--color` / `-v` / 配置文件 | 已实现 | `--color always/never/auto`；只读取 `/etc/pacdpkg.conf`；`Color` 选项按 pacman 语义（仅在 tty 上生效），颜色码与 pacman 的 `enable_colors()` 完全一致 |
 | `--debug` / `--ask` / `--hookdir` / `--gpgdir` / `--logfile` | 仅校验/接受 | 无 hooks；apt 管理自身信任与日志 |
 | `-R` / `-Rs` / `-Rss` / `-Rn` / `-Rns` | 已实现 | libapt 标记删除；`-Rs` 用 `MarkAndSweep` 删除不再需要的自动安装包，`-Rn` 走 purge |
