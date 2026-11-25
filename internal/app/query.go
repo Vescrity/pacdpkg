@@ -540,6 +540,11 @@ func (a *App) queryPackageFiles() int {
 	}
 	ret := 0
 	for _, t := range a.targets {
+		if t == "" {
+			Errorf("could not load package '': wrong or NULL argument passed")
+			ret = 1
+			continue
+		}
 		pf, err := deb.OpenPackageFile(t)
 		if err != nil {
 			Errorf("could not load package '%s': %v", t, err)
