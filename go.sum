@@ -1,5 +1,5 @@
-github.com/klauspost/compress v1.20.5 h1:rJj5VjH4xQxbnLphg6eqUcDxRFCw1jpMdDY9qXlrwSs=
-github.com/klauspost/compress v1.20.5/go.mod h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=
+github.com/klauspost/compress v1.17.11 h1:In6xLpyWOi1+C7tXUUWv2ot1QvBjxevKAaI6IXrJmUc=
+github.com/klauspost/compress v1.17.11/go.mod h1:pMDklpSncoRMuLFrf1W9Ss9KT+0rH90U12bZKk7uwG0=
 github.com/pierrec/lz4/v4 v4.1.34 h1:5cPY8+z/ffHDpF6Pvv5FffjtZOJJQEiG75267Ol3QtU=
 github.com/pierrec/lz4/v4 v4.1.34/go.mod h1:R7aiqKav9M7+k1JW19D7y7rcavDvw9Te/YTdFJyNXBs=
 github.com/ulikunitz/xz v0.5.17 h1:flR0y/x1hgM8EGV1AW3Xll6T413G0glV8UfBwR617V4=

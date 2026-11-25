@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"pacdpkg/internal/alpm"
+	"pacdpkg/internal/aptplan"
 	"pacdpkg/internal/deb"
 )
 
@@ -80,15 +81,38 @@ func (a *App) upgrade() int {
 		return 0
 	}
 
-	sync := a.loadSync()
-	if sync == nil {
-		return 1
-	}
 	if !a.cfg.Print {
 		fmt.Fprintln(os.Stdout, "resolving dependencies...")
 		if !a.cfg.DownloadOnly {
 			fmt.Fprintln(os.Stdout, "looking for conflicting packages...")
 		}
+	}
+	if aptplan.Available() && a.cfg.Nodeps == 0 {
+		var ats []aptplan.Target
+		for _, t := range targets {
+			ats = append(ats, aptplan.Target{Name: t.Name, Version: t.Version, Deb: t.DebPath})
+		}
+		res, err := aptplan.Resolve(aptplan.OpInstall, ats, aptplan.Options{
+			Needed: a.cfg.Needed,
+			Lock:   !a.cfg.Print && !a.cfg.DownloadOnly,
+		})
+		if err != nil {
+			Errorf("%v", err)
+			return 1
+		}
+		if len(res.Problems) > 0 {
+			a.reportPlanProblems(nil, res.Problems)
+			return 1
+		}
+		if !a.confirmRemovals(res.Plan) {
+			aptplan.Close(res.Session)
+			return 1
+		}
+		return a.commitPlan(res.Plan, txOpts{paths: paths})
+	}
+	sync := a.loadSync()
+	if sync == nil {
+		return 1
 	}
 	plan, problems := sync.ResolveInstall(db, targets, false)
 	if a.reportPlanProblems(plan, problems) {

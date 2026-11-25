@@ -8,14 +8,20 @@
 ## 构建与安装
 
 ```sh
-make build      # bin/pacdpkg，静态链接，无运行时依赖
+apt-get install libapt-pkg-dev   # 只在构建 libapt 版本时需要
+make build                       # 检测到 apt 头文件时自动带 -tags libapt
 make test
-make install    # 安装到 /usr/local，含补全脚本
-make cross      # dist/pacdpkg-linux-{amd64,arm64}
+make install                     # 安装到 /usr/local，含补全脚本
 ```
 
+`make build` 在没有 apt 头文件的机器上（例如 Arch）构建一个只支持查询的二进制；
+事务操作会提示没有 libapt 支持。Debian 系上装上 `libapt-pkg-dev` 后会默认链接
+`libapt-pkg`，需要保留查询-only 构建时用 `make build TAGS=`。
+
 `make install` 支持 `PREFIX`、`DATADIR`、`BASH_COMPDIR`、`ZSH_COMPDIR`，
-打包时按发行版布局覆盖即可。
+打包时按发行版布局覆盖即可。链接 libapt 后不是静态二进制，运行时依赖
+`libapt-pkg6.0`、`libstdc++6` 和 `libc6`；交叉编译需要在目标架构的
+sysroot/容器里进行，不再提供裸 `make cross`。
 
 ## 用法
 
@@ -76,22 +82,25 @@ completions/_pacdpkg       → $(ZSH_COMPDIR)/_pacdpkg
 
 ## 实现
 
-包信息、安装原因、文件校验、候选版本、仓库地址和 `.deb` 元数据都直接从
-dpkg 与 apt 的数据文件或归档里读（`/var/lib/dpkg/status`、`/var/lib/dpkg/info`、
+查询所需的包信息、安装原因、文件校验、仓库地址和 `.deb` 元数据直接读
+dpkg 与 apt 的数据文件或归档（`/var/lib/dpkg/status`、`/var/lib/dpkg/info`、
 `/var/lib/apt/extended_states`、`/var/lib/apt/lists`、`sources.list`、
-`preferences`、deb 的 ar/tar），压缩的仓库列表在进程内解压，不解析命令输出。
+deb 的 ar/tar），压缩的仓库列表在进程内解压，不解析命令输出。
 
-事务由内置的求解器算出完整的安装、升级、卸载计划，确认后以 `pkg=version`
-的形式交给 `apt-get`，避免 apt 在两次计算之间选到别的版本。
+事务计划由 `libapt-pkg` 的 `pkgDepCache` / `pkgProblemResolver` 计算，
+执行用同一份 depcache 走 `pkgPackageManager` / `pkgDPkgPM`，计划和实际执行
+不会二次求解。构建时若没有 libapt 头文件，则退回到内置的 Go 求解器，仅供
+查询和开发使用。
 
 ## 与 pacman 的差异
 
 - Debian 没有包组，`-Sg` / `-Qg` 用 apt 的 section 代替。
 - `-F` 依赖仓库发布的 Contents 索引。Deepin 和 UOS 的仓库不发布，`-Fy` 会逐个提示
   这些仓库没有文件索引，`-F` 也就查不到结果。
+- 不使用 apt 的 pin 和 phased updates：候选版本取仓库里的最高版本。
 - Recommends 和 Suggests 映射成 optdepends，`-Qdtt` 据此判断孤儿包。
 - `-Qc` 读 `/usr/share/doc/<pkg>/changelog.Debian.gz`，没有时提示 changelog 不可用。
-- 只读取本机架构的包。
+- 查询用的仓库索引仍只加载本机架构，事务由 libapt 处理。
 
 ## 许可
 

@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"pacdpkg/internal/aptplan"
 	"pacdpkg/internal/deb"
 	"pacdpkg/internal/render"
 )
@@ -43,16 +44,6 @@ func (a *App) remove() int {
 	}
 
 	targets := explicit
-	if a.cfg.Cascade {
-		targets = db.DependentClosure(targets)
-	}
-	if a.cfg.Recursive > 0 {
-		if !db.ReasonsKnown() {
-			Errorf("cannot determine install reasons; refusing to remove dependencies")
-			return 1
-		}
-		targets = db.RemovalClosure(targets, a.cfg.Recursive > 1)
-	}
 	if a.cfg.Unneeded {
 		targets = keepUnneeded(targets, func(name string) []string {
 			if p := db.Get(name); p != nil {
@@ -66,16 +57,6 @@ func (a *App) remove() int {
 		fmt.Fprintln(os.Stdout, "checking dependencies...")
 	}
 
-	if a.cfg.Nodeps == 0 && !a.cfg.Cascade {
-		if broken := brokenDeps(db, targets); len(broken) > 0 {
-			Errorf("failed to prepare transaction (could not satisfy dependencies)")
-			for _, line := range broken {
-				fmt.Fprintf(os.Stdout, ":: %s\n", line)
-			}
-			return 1
-		}
-	}
-
 	if a.warnHoldPkg(targets) &&
 		!render.Question("HoldPkg was found in target list. Do you want to continue?", false, a.cfg.NoConfirm) {
 		return 1
@@ -84,6 +65,51 @@ func (a *App) remove() int {
 	if len(targets) == 0 {
 		fmt.Fprintln(os.Stdout, " there is nothing to do")
 		return 0
+	}
+
+	if aptplan.Available() && a.cfg.Nodeps == 0 {
+		var ats []aptplan.Target
+		for _, name := range targets {
+			ats = append(ats, aptplan.Target{Name: name})
+		}
+		res, err := aptplan.Resolve(aptplan.OpRemove, ats, aptplan.Options{
+			Purge:     a.cfg.NoSave,
+			Recursive: a.cfg.Recursive,
+			Cascade:   a.cfg.Cascade,
+			Lock:      !a.cfg.Print,
+		})
+		if err != nil {
+			Errorf("%v", err)
+			return 1
+		}
+		if len(res.Problems) > 0 {
+			a.reportPlanProblems(nil, res.Problems)
+			return 1
+		}
+		return a.commitPlan(res.Plan, txOpts{
+			question: "Do you want to remove these packages?",
+		})
+	}
+
+	if a.cfg.Cascade {
+		targets = db.DependentClosure(targets)
+	}
+	if a.cfg.Recursive > 0 {
+		if !db.ReasonsKnown() {
+			Errorf("cannot determine install reasons; refusing to remove dependencies")
+			return 1
+		}
+		targets = db.RemovalClosure(targets, a.cfg.Recursive > 1)
+	}
+
+	if a.cfg.Nodeps == 0 && !a.cfg.Cascade {
+		if broken := brokenDeps(db, targets); len(broken) > 0 {
+			Errorf("failed to prepare transaction (could not satisfy dependencies)")
+			for _, line := range broken {
+				fmt.Fprintf(os.Stdout, ":: %s\n", line)
+			}
+			return 1
+		}
 	}
 
 	plan := &deb.Plan{}

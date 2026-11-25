@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"pacdpkg/internal/alpm"
+	"pacdpkg/internal/aptplan"
 	"pacdpkg/internal/deb"
 	"pacdpkg/internal/render"
 )
@@ -99,6 +100,30 @@ func (a *App) syncTransaction() int {
 		fmt.Fprintln(os.Stdout, "resolving dependencies...")
 		fmt.Fprintln(os.Stdout, "looking for conflicting packages...")
 	}
+	if aptplan.Available() {
+		var ats []aptplan.Target
+		for _, t := range targets {
+			ats = append(ats, aptplan.Target{Name: t.Name, Version: t.Version, Repo: t.Repo})
+		}
+		res, err := aptplan.Resolve(aptplan.OpInstall, ats, aptplan.Options{
+			Needed: a.cfg.Needed,
+			Lock:   !a.cfg.Print && !a.cfg.DownloadOnly,
+		})
+		if err != nil {
+			Errorf("%v", err)
+			return 1
+		}
+		if len(res.Problems) > 0 {
+			a.reportPlanProblems(nil, res.Problems)
+			return 1
+		}
+		enrichPlan(sync, res.Plan)
+		if !a.confirmRemovals(res.Plan) {
+			aptplan.Close(res.Session)
+			return 1
+		}
+		return a.commitPlan(res.Plan, txOpts{})
+	}
 	plan, problems := sync.ResolveInstall(db, targets, false)
 	if a.reportPlanProblems(plan, problems) {
 		return 1
@@ -140,6 +165,31 @@ func (a *App) syncUpgrade() int {
 				Warnf("%s: ignoring package upgrade (held)", p.Name)
 			}
 		}
+	}
+	if aptplan.Available() && !a.hasIgnore() {
+		op := aptplan.OpUpgrade
+		var ats []aptplan.Target
+		if len(targets) > 0 {
+			op = aptplan.OpInstall
+			for _, t := range targets {
+				ats = append(ats, aptplan.Target{Name: t.Name, Version: t.Version, Repo: t.Repo})
+			}
+		}
+		res, err := aptplan.Resolve(op, ats, aptplan.Options{
+			Downgrade:   a.cfg.SysUpgrade > 1,
+			UpgradeOnly: len(targets) > 0,
+			Lock:        !a.cfg.Print && !a.cfg.DownloadOnly,
+		})
+		if err != nil {
+			Errorf("%v", err)
+			return 1
+		}
+		if len(res.Problems) > 0 {
+			a.reportPlanProblems(nil, res.Problems)
+			return 1
+		}
+		enrichPlan(sync, res.Plan)
+		return a.commitPlan(res.Plan, txOpts{})
 	}
 	plan, problems := sync.ResolveInstall(db, targets, true)
 	if a.reportPlanProblems(plan, problems) {
@@ -193,6 +243,7 @@ type txOpts struct {
 
 // commitPlan renders a plan, asks for confirmation and executes it.
 func (a *App) commitPlan(plan *deb.Plan, o txOpts) int {
+	defer aptplan.Close(plan.Session)
 	if plan.Empty() {
 		if !a.cfg.Print {
 			fmt.Fprintln(os.Stdout, " there is nothing to do")
@@ -240,6 +291,14 @@ func (a *App) commitPlan(plan *deb.Plan, o txOpts) int {
 	} else {
 		fmt.Fprintln(os.Stdout, ":: Processing package changes...")
 		a.showChanges(tx)
+	}
+
+	if plan.Session != 0 {
+		if err := aptplan.Execute(plan.Session, a.cfg.DownloadOnly); err != nil {
+			Errorf("%v", err)
+			return 1
+		}
+		return 0
 	}
 
 	previous, reasonsOK := a.installReasons()
@@ -504,6 +563,9 @@ func (a *App) pkgLocation(p *deb.PlannedPkg, paths map[string]string) string {
 			return path
 		}
 	}
+	if p.URL != "" {
+		return p.URL
+	}
 	if p.DebPath != "" {
 		return p.DebPath
 	}
@@ -535,4 +597,72 @@ func (a *App) ignoredGroup(p *alpm.Pkg) bool {
 		}
 	}
 	return false
+}
+
+func (a *App) hasIgnore() bool {
+	return len(a.cfg.IgnorePkg)+len(a.conf.IgnorePkg)+len(a.cfg.IgnoreGroup)+len(a.conf.IgnoreGroup) > 0
+}
+
+// confirmRemovals asks pacman's conflict and replacement questions for
+// packages the resolver removes without being asked.
+func (a *App) confirmRemovals(plan *deb.Plan) bool {
+	if plan.Removals == nil || a.cfg.Print || a.cfg.DownloadOnly {
+		return true
+	}
+	for _, p := range plan.Remove {
+		info := plan.Removals[p.Name]
+		switch info.Reason {
+		case "conflict":
+			if !render.Question(fmt.Sprintf("%s and %s are in conflict. Remove %s?",
+				info.Other, p.Name, p.Name), false, a.cfg.NoConfirm) {
+				return false
+			}
+		case "replace":
+			target := info.Other
+			if info.Repo != "" {
+				target = info.Repo + "/" + target
+			}
+			if !render.Question(fmt.Sprintf("Replace %s with %s?", p.Name, target), true, a.cfg.NoConfirm) {
+				return false
+			}
+		default:
+			Errorf("cannot remove %s: the resolver needs it for dependency resolution", p.Name)
+			return false
+		}
+	}
+	return true
+}
+
+// enrichPlan fills in the repository URL and display metadata that libapt's
+// cache does not expose through its public iterators.
+func enrichPlan(sync *deb.Sync, plan *deb.Plan) {
+	if sync == nil || plan == nil {
+		return
+	}
+	for _, p := range plan.Install {
+		if p.DebPath != "" {
+			continue
+		}
+		sp := sync.Find(p.Name, p.NewVersion)
+		if sp == nil {
+			continue
+		}
+		if sp.Repo != "" {
+			p.Repo = sp.Repo
+		}
+		if p.Sync != nil {
+			p.Sync.Repo = sp.Repo
+			p.Sync.Filename = sp.Filename
+			p.Sync.Source = sp.Source
+			if sp.DownloadSize > 0 {
+				p.Sync.DownloadSize = sp.DownloadSize
+			}
+			if sp.InstalledSize > 0 {
+				p.Sync.InstalledSize = sp.InstalledSize
+			}
+		}
+		if sp.Source != nil && sp.Filename != "" {
+			p.URL = sp.Source.PackageURL(sp.Filename)
+		}
+	}
 }

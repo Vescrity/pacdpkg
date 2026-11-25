@@ -25,13 +25,13 @@
 | `-Qc` | 已实现 | `/usr/share/doc/<pkg>/changelog.Debian.gz`（或 `changelog.gz`），无则报错但退出码仍为 0（与 pacman 一致） |
 | `-Qg` / `-Sg` | 已实现（近似） | deb 无 group 概念，用 `Section` 近似 |
 | `-Qp` / `-Qpi` / `-Qpl` | 已实现 | `dpkg-deb -f` 解析控制字段，`dpkg-deb -c` 取文件列表；`Compressed Size` 为文件大小，`Signatures` 固定 `None` |
-| `-Ss` / `-Ssq` | 已实现 | 解析 apt lists（压缩文件经 `apt-helper cat-file` 流式读取），多个目标是 AND 关系，匹配包名/描述/Provides/Section，输出 `repo/name ver` 与 `[installed]` |
+| `-Ss` / `-Ssq` | 已实现 | 解析 apt lists（压缩文件在进程内解压），多个目标是 AND 关系，匹配包名/描述/Provides/Section，输出 `repo/name ver` 与 `[installed]` |
 | `-Si` / `-Sii` | 已实现 | apt lists 字段；`Download Size` 来自 `Size`，`-Sii` 追加 `SHA-256 Sum` 与 `Signatures` |
 | `-Sl` | 已实现 | 按仓库列出；仓库标签为 `<suite>/<component>`，flat 仓库取主机名；同一 (仓库, 包, 版本) 去重 |
 | `-Sg` / `-Sgg` | 已实现（近似） | 仍以 `Section` 当 group |
 | `-Sc` / `-Scc` | 已实现 | 自己清理 `/var/cache/apt/archives`：`-Sc` 保留所有已安装版本（pacman 的 KeepInstalled 语义），`-Scc` 清空 |
 | `-Sy` / `-Syy` | 已实现 | `apt-get update` 直接流式输出；`-Syy` 先把旧 lists 移到 `/var/cache/pacdpkg/lists-backup`，失败或索引缺失时精确回滚。apt 在部分仓库失败时仍返回 0，因此额外检查「备份中每个索引是否重新出现」以及「每个 (URI,suite) 至少有一个索引」 |
-| `-S` / `-Su` / `-Suu` | 已实现 | 自研 resolver 计算依赖闭包 → pacman 摘要 → 确认 → 以 `pkg=version` 锁定执行；`--needed`、`--asdeps`、`--asexplicit`、`--overwrite` 已映射 |
+| `-S` / `-Su` / `-Suu` | 已实现 | libapt 的 `pkgDepCache` / `pkgProblemResolver` 计算计划 → pacman 摘要 → 确认 → 同一份 depcache 走 `pkgPackageManager` 执行；`--needed`、`--asdeps`、`--asexplicit` 已映射 |
 | `-Sw` / `-Sp` / `--print-format` | 已实现 | `-Sw` 走 `--download-only` 并提示 `Proceed with download?`；`-Sp` 直接从计划与 sources 拼 URL（与 apt 的镜像选择、百分号转义一致），支持 `%n %v %r %s %a %l %f %d %p %u` |
 | `--dbonly` / `--noscriptlet` / `--assume-installed` / `--overwrite` | 明确拒绝 | deb 后端无等价语义（dpkg 只能全局覆盖，无法按路径限定），直接报错而不是静默降级 |
 | `--nodeps` | 按操作映射 | `-R` 用 `dpkg -r --force-depends`（apt 会连带删依赖者），`-U` 对纯本地包用 `dpkg -i --force-depends`；`-S` 无等价语义，报错 |
@@ -39,11 +39,11 @@
 | `--cachedir` / `--arch` / `--config` / `--noconfirm` / `--confirm` / `-v` | 已映射 | `-o Dir::Cache::archives` / `-o APT::Architecture` / pacdpkg.conf 方言 / 单布尔三态 / 配置横幅 |
 | `--color` / `-v` / 配置文件 | 已实现 | `--color always/never/auto`；只读取 `/etc/pacdpkg.conf`；`Color` 选项按 pacman 语义（仅在 tty 上生效），颜色码与 pacman 的 `enable_colors()` 完全一致 |
 | `--debug` / `--ask` / `--hookdir` / `--gpgdir` / `--logfile` | 仅校验/接受 | 无 hooks；apt 管理自身信任与日志 |
-| `-R` / `-Rs` / `-Rss` / `-Rn` / `-Rns` | 已实现 | `apt-get remove` / `purge`；依赖闭包由 `RemovalClosure` 计算（`-Rss` 连显式安装的依赖一起） |
-| `-Rc` / `-Ru` / `-Rd` | 已实现 | 反向依赖闭包 / 仅删无依赖者 / `Dpkg::Options::=--force-depends` |
+| `-R` / `-Rs` / `-Rss` / `-Rn` / `-Rns` | 已实现 | libapt 标记删除；`-Rs` 用 `MarkAndSweep` 删除不再需要的自动安装包，`-Rn` 走 purge |
+| `-Rc` / `-Ru` / `-Rd` | 已实现 | `-Rc` 按删除后仍被满足的依赖级联；`-Ru` 先过滤仍被需要的目标；`-Rdd` 仍走 `dpkg --force-depends` |
 | `-R` 依赖保护 | 已实现 | 删除会破坏未删除包的依赖时，按 pacman 拒绝事务并打印 `removing X breaks dependency ...` |
 | `-Rp` / `--print-format` | 已实现 | `name-version` / `%n %v %r %l`；`-n` + `-p` 按 pacman 报冲突 |
-| `-U` / `-Udd` / `-U --needed` | 已实现 | `apt-get install ./x.deb --allow-downgrades`；本地文件大小/元数据取自 `dpkg-deb`，重装同版本自动加 `--reinstall` |
+| `-U` / `-Udd` / `-U --needed` | 已实现 | 本地 deb 通过 `debDebPkgFileIndex` 加进 libapt 缓存后求解，执行走 `pkgDPkgPM`；`-Udd` 仍走 `dpkg --force-depends` |
 | `-Up` / `--print-format` | 已实现 | 默认输出文件路径；`%a %d %p %u` 来自包的 control 字段 |
 | `-T` | 已实现 | 解析 pacman 依赖语法（`= >= <= > <`），支持 Provides，未满足输出并以 **127** 退出 |
 | `-D --asdeps` / `--asexplicit` | 已实现 | `apt-mark auto/manual`，成功提示与 `-q` 抑制同 pacman |
@@ -136,8 +136,8 @@
 
 ## 数据来源（零输出依赖）
 
-pacdpkg 不解析任何命令输出。事务计划由内置 resolver 从结构化数据计算，
-执行时用 `name=version` 锁定版本，apt 只负责搬运和落盘：
+pacdpkg 不解析任何命令输出。查询数据直接读文件；事务计划由 libapt 从同一份
+缓存计算，执行走 `pkgPackageManager`，不会再让 apt 二次求解：
 
 | 数据 | 来源 |
 |---|---|
@@ -147,24 +147,24 @@ pacdpkg 不解析任何命令输出。事务计划由内置 resolver 从结构�
 | held | status 的 `Status: hold ...` |
 | 仓库包、版本、尺寸、依赖 | `/var/lib/apt/lists/*_Packages` |
 | 仓库元数据（suite/codename/NotAutomatic） | `/var/lib/apt/lists/*_InRelease` |
-| 候选版本 | objects 上述数据 + `/etc/apt/preferences*` 自行计算 |
+| 候选版本 | libapt 缓存；pacdpkg 覆写为仓库最高版本，忽略 pin/phasing |
 | Contents（`-F`） | apt Contents 索引（gzip 文本） |
 | `.deb` 元数据与文件列表 | Go 直接解析 ar + control.tar/data.tar（gz/xz/zstd） |
 | 仓库地址与 Contents URL | 解析 `/etc/apt/sources.list` 与 `sources.list.d/*`（单行与 deb822） |
 | 架构 | 从 status 统计 |
 
-仍然会调用的命令只有**动作类**，输出不解析、只看退出码：`apt-get install/remove/purge/update/clean/autoclean`、`apt-mark auto/manual`。
+仍然会调用的命令只有**动作类**，输出不解析、只看退出码：`apt-get update`、`dpkg --force-depends`（仅 `-Rdd`/`-Udd`）、`apt-mark auto/manual`（`-D`）。
 
-事务计划由 `internal/deb/resolve.go` 计算：依赖闭包、版本约束、Provides、Conflicts/Breaks、Replaces、pin/default-release 优先级；执行时把计划里的每个包以 `pkg=version` 传给 apt，并加 `--no-remove --no-install-recommends`，使 apt 不能偏离计划。事务完成后按事务前的 manual/auto 状态回填安装原因。
+事务计划由 `internal/aptplan` 通过 libapt 的 `pkgDepCache` 计算；依赖闭包、alternatives、Provides、Conflicts/Breaks/Replaces、多架构都由 libapt 处理。候选版本在求解前统一改成仓库里的最高版本，因此 pin 和 phased updates 不生效。执行用同一份 depcache 交给 `pkgPackageManager`，安装原因由 depcache 写回 `/var/lib/apt/extended_states`。
 
 ## 事务求解的已知偏差
 
-1. 一个依赖有多个 Provides 时取名字序第一个（pacman 会交互询问）
-2. 不处理 apt 的 phased updates（计划会按候选版本升级）
-3. Recommends/Suggests 不安装（pacman 的 optdepends 语义），执行时用 `--no-install-recommends` 防止 apt 自行添加
-4. 冲突/Breaks 直接拒绝事务，不做自动解决
-5. 计划不满足时不会退回 apt 的求解器，而是按 pacman 风格报错
-6. 只读本机架构的 packages 列表（与 pacman 的单架构视图一致）：i386 等外来架构的列表不参与 `-Ss/-Sl/-Qu` 与候选选择
+1. 不遵循 apt 的 pin 和 phased updates：候选版本取仓库里的最高版本
+2. Recommends/Suggests 不安装（pacman 的 optdepends 语义）
+3. 与已安装包冲突或替换时按 pacman 的 `Remove ...?` / `Replace ...?` 提问；为了依赖而删除未点名的包会直接拒绝
+4. `-Su <targets>` 目前只升级指定目标，不做「先全系统升级再处理目标」
+5. 查询用的仓库索引仍只加载本机架构；事务由 libapt 处理多架构
+6. `-T` / `-Dkk` / `-Qdt` 仍使用 Go 侧依赖模型，尚未迁移到 libapt
 
 ## 事务细节
 
