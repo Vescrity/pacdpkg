@@ -244,6 +244,13 @@ func md5File(path string) string {
 }
 
 func md5FileErr(path string) (string, error) {
+	st, err := os.Lstat(path)
+	if err != nil {
+		return "", err
+	}
+	if !st.Mode().IsRegular() {
+		return "", fmt.Errorf("not a regular file: %s", path)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err

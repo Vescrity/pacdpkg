@@ -3,6 +3,8 @@ package app
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -337,30 +339,42 @@ func (a *App) syncGroup() int {
 
 func (a *App) syncRefresh() int {
 	fmt.Fprintln(os.Stdout, ":: Synchronizing package databases...")
+	lock, err := lockLists()
+	if err != nil {
+		Errorf("could not get the package list lock: %v", err)
+		return 1
+	}
+	recoverLists()
+
 	backup := false
 	if a.cfg.Refresh > 1 {
-		var err error
 		backup, err = moveListsAside()
 		if err != nil {
 			Warnf("could not move the old package lists aside: %v", err)
+			if backup {
+				restoreLists()
+			}
+			unlockLists(lock)
+			return 1
 		}
 	}
-	if err := deb.RunStream("apt-get", "update"); err != nil {
-		Errorf("failed to synchronize all databases: %v", err)
+	unlockLists(lock)
+	lock = nil
+	defer func() { unlockLists(lock) }()
+
+	if err := runUpdate(); err != nil {
+		if l, lerr := lockLists(); lerr == nil {
+			lock = l
+		}
 		if backup {
 			restoreLists()
 		}
+		Errorf("failed to synchronize all databases: %v", err)
 		return 1
 	}
-	if backup {
-		if missing := missingSinceBackup(); len(missing) > 0 {
-			Errorf("failed to synchronize all databases (failed to retrieve some files)")
-			for _, name := range missing {
-				Warnf("missing database file: %s", name)
-			}
-			restoreLists()
-			return 1
-		}
+	if lock, err = lockLists(); err != nil {
+		Errorf("could not get the package list lock: %v", err)
+		return 1
 	}
 	if broken := repositoriesWithoutIndex(); len(broken) > 0 {
 		Errorf("failed to synchronize all databases (failed to retrieve some files)")
@@ -378,21 +392,69 @@ func (a *App) syncRefresh() int {
 	return 0
 }
 
-// missingSinceBackup reports indexes that existed before a forced refresh
-// but were not downloaded again. apt-get update exits successfully when only
-// some repositories fail, so presence is checked here.
-func missingSinceBackup() []string {
-	entries, err := os.ReadDir(listsBackup)
+// lockFile takes the same fcntl lock apt uses for a directory.
+func lockFile(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	var missing []string
-	for _, e := range entries {
-		if !indexExists(e.Name()) {
-			missing = append(missing, e.Name())
-		}
+	lk := syscall.Flock_t{Type: syscall.F_WRLCK}
+	if err := syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, &lk); err != nil {
+		f.Close()
+		return nil, err
 	}
-	return missing
+	return f, nil
+}
+
+func unlockFile(f *os.File) {
+	if f == nil {
+		return
+	}
+	lk := syscall.Flock_t{Type: syscall.F_UNLCK}
+	syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, &lk)
+	f.Close()
+}
+
+func lockLists() (*os.File, error) {
+	return lockFile(filepath.Join(listsDir, "lock"))
+}
+
+func unlockLists(f *os.File) { unlockFile(f) }
+
+// runUpdate streams apt-get update and restores on SIGINT/SIGTERM so an
+// interrupted -Syy does not leave the lists directory empty.
+func runUpdate() error {
+	args := append(append([]string{}, deb.ExtraArgs...), "update")
+	cmd := exec.Command("apt-get", args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(ch)
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		return err
+	case sig := <-ch:
+		_ = cmd.Process.Signal(sig)
+		<-done
+		return fmt.Errorf("interrupted")
+	}
+}
+
+// recoverLists restores a backup left by a killed -Syy before apt reads the
+// lists again.
+func recoverLists() {
+	entries, err := os.ReadDir(listsBackup)
+	if err != nil || len(entries) == 0 {
+		return
+	}
+	restoreLists()
 }
 
 // repositoriesWithoutIndex reports configured repositories that produced no
@@ -549,19 +611,14 @@ func (a *App) cacheDir() string {
 // cleanCache implements -Sc/-Scc. Level 1 keeps cached packages that are
 // installed (pacman's default CleanMethod), level 2 removes everything.
 func cleanCache(dir string, level int) error {
+	lock, err := lockFile(filepath.Join(dir, "lock"))
+	if err != nil {
+		return fmt.Errorf("could not get the cache lock: %w", err)
+	}
+	defer unlockFile(lock)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err
-	}
-	if lock, err := os.OpenFile(filepath.Join(dir, "lock"), os.O_CREATE|os.O_RDWR, 0o600); err == nil {
-		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-			lock.Close()
-			return fmt.Errorf("could not get the cache lock")
-		}
-		defer func() {
-			syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-			lock.Close()
-		}()
 	}
 	keep := map[string]bool{}
 	if level == 1 {

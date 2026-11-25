@@ -62,6 +62,11 @@ func (db *DB) Verify(p *alpm.Pkg, full bool) (VerifyResult, error) {
 		if st.IsDir() || sums == nil {
 			continue
 		}
+		if !st.Mode().IsRegular() {
+			res.Altered++
+			res.AlteredPaths = append(res.AlteredPaths, path)
+			continue
+		}
 		if want, ok := sums[path]; ok {
 			sum, err := md5FileErr(path)
 			if err != nil {
@@ -81,6 +86,11 @@ func (db *DB) Verify(p *alpm.Pkg, full bool) (VerifyResult, error) {
 			continue
 		}
 		if st.IsDir() || cf.Sum == "" {
+			continue
+		}
+		if !st.Mode().IsRegular() {
+			res.Altered++
+			res.AlteredPaths = append(res.AlteredPaths, cf.Path)
 			continue
 		}
 		sum, err := md5FileErr(cf.Path)
