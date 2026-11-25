@@ -115,11 +115,14 @@ func (a *App) syncTransaction() int {
 			ats = append(ats, aptplan.Target{Name: t.Name, Version: t.Version, Repo: t.Repo})
 		}
 		res, err := aptplan.Resolve(aptplan.OpInstall, ats, aptplan.Options{
-			Needed:       a.cfg.Needed,
-			AsDeps:       a.cfg.AsDeps,
-			AsExplicit:   a.cfg.AsExplicit,
-			OverrideHeld: overrideHeld,
-			Lock:         !a.cfg.Print && !a.cfg.DownloadOnly,
+			Needed:        a.cfg.Needed,
+			AsDeps:        a.cfg.AsDeps,
+			AsExplicit:    a.cfg.AsExplicit,
+			OverrideHeld:  overrideHeld,
+			Lock:          !a.cfg.Print && !a.cfg.DownloadOnly,
+			Arch:          a.cfg.Arch,
+			Cachedir:      a.cfg.CacheDir,
+			Architectures: a.cfg.ArchList,
 		})
 		if err != nil {
 			Errorf("%v", err)
@@ -207,12 +210,15 @@ func (a *App) syncUpgrade() int {
 	}
 	if aptplan.Available() {
 		res, err := aptplan.Resolve(aptplan.OpUpgrade, ats, aptplan.Options{
-			Downgrade:    a.cfg.SysUpgrade > 1,
-			Needed:       a.cfg.Needed,
-			OverrideHeld: overrideHeld,
-			IgnorePkgs:   append(append([]string{}, a.cfg.IgnorePkg...), a.conf.IgnorePkg...),
-			IgnoreGroups: append(append([]string{}, a.cfg.IgnoreGroup...), a.conf.IgnoreGroup...),
-			Lock:         !a.cfg.Print && !a.cfg.DownloadOnly,
+			Downgrade:     a.cfg.SysUpgrade > 1,
+			Needed:        a.cfg.Needed,
+			OverrideHeld:  overrideHeld,
+			IgnorePkgs:    append(append([]string{}, a.cfg.IgnorePkg...), a.conf.IgnorePkg...),
+			IgnoreGroups:  append(append([]string{}, a.cfg.IgnoreGroup...), a.conf.IgnoreGroup...),
+			Lock:          !a.cfg.Print && !a.cfg.DownloadOnly,
+			Arch:          a.cfg.Arch,
+			Cachedir:      a.cfg.CacheDir,
+			Architectures: a.cfg.ArchList,
 		})
 		if err != nil {
 			Errorf("%v", err)

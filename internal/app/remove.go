@@ -80,11 +80,14 @@ func (a *App) remove() int {
 			ats = append(ats, aptplan.Target{Name: name})
 		}
 		res, err := aptplan.Resolve(aptplan.OpRemove, ats, aptplan.Options{
-			Purge:        a.cfg.NoSave,
-			Recursive:    a.cfg.Recursive,
-			Cascade:      a.cfg.Cascade,
-			OverrideHeld: held,
-			Lock:         !a.cfg.Print,
+			Purge:         a.cfg.NoSave,
+			Recursive:     a.cfg.Recursive,
+			Cascade:       a.cfg.Cascade,
+			OverrideHeld:  held,
+			Lock:          !a.cfg.Print,
+			Arch:          a.cfg.Arch,
+			Cachedir:      a.cfg.CacheDir,
+			Architectures: a.cfg.ArchList,
 		})
 		if err != nil {
 			Errorf("%v", err)

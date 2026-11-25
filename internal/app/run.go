@@ -157,6 +157,9 @@ func Run(argv []string) int {
 	if cfg.Arch == "" && cfgConf.Architecture != "" && cfgConf.Architecture != "auto" {
 		cfg.Arch = cfgConf.Architecture
 	}
+	if len(cfg.ArchList) == 0 && cfg.Arch != "" {
+		cfg.ArchList = []string{cfg.Arch}
+	}
 
 	if cfg.CacheDirSet {
 		if cfg.CacheDir == "" {
@@ -177,7 +180,11 @@ func Run(argv []string) int {
 	if cfg.CacheDir != "" {
 		deb.ExtraArgs = append(deb.ExtraArgs, "-o", "Dir::Cache::archives="+cfg.CacheDir)
 	}
-	if cfg.Arch != "" {
+	if len(cfg.ArchList) > 1 {
+		for _, arch := range cfg.ArchList {
+			deb.ExtraArgs = append(deb.ExtraArgs, "-o", "APT::Architectures::="+arch)
+		}
+	} else if cfg.Arch != "" {
 		deb.ExtraArgs = append(deb.ExtraArgs, "-o", "APT::Architecture="+cfg.Arch)
 	}
 

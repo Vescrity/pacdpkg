@@ -38,19 +38,22 @@ type Target struct {
 
 // Options carry the operation flags that change the plan.
 type Options struct {
-	Needed       bool
-	Purge        bool
-	Recursive    int
-	Cascade      bool
-	ForceDeps    bool
-	Downgrade    bool
-	Lock         bool
-	UpgradeOnly  bool
-	AsDeps       bool
-	AsExplicit   bool
-	OverrideHeld bool
-	IgnorePkgs   []string
-	IgnoreGroups []string
+	Needed        bool
+	Purge         bool
+	Recursive     int
+	Cascade       bool
+	ForceDeps     bool
+	Downgrade     bool
+	Lock          bool
+	UpgradeOnly   bool
+	AsDeps        bool
+	AsExplicit    bool
+	OverrideHeld  bool
+	IgnorePkgs    []string
+	IgnoreGroups  []string
+	Arch          string
+	Cachedir      string
+	Architectures []string
 }
 
 // Result is a resolved plan plus the libapt session that can execute it.
@@ -138,6 +141,7 @@ func Resolve(op Op, targets []Target, o Options) (*Result, error) {
 	debs := newCStringArray(n)
 	ignp := newCStringArray(len(o.IgnorePkgs))
 	igng := newCStringArray(len(o.IgnoreGroups))
+	archs := newCStringArray(len(o.Architectures))
 	defer func() {
 		freeCStringArray(names, n)
 		freeCStringArray(versions, n)
@@ -145,6 +149,7 @@ func Resolve(op Op, targets []Target, o Options) (*Result, error) {
 		freeCStringArray(debs, n)
 		freeCStringArray(ignp, len(o.IgnorePkgs))
 		freeCStringArray(igng, len(o.IgnoreGroups))
+		freeCStringArray(archs, len(o.Architectures))
 	}()
 	for i, t := range targets {
 		setCString(names, i, t.Name)
@@ -159,12 +164,24 @@ func Resolve(op Op, targets []Target, o Options) (*Result, error) {
 	for i, pat := range o.IgnoreGroups {
 		setCString(igng, i, pat)
 	}
+	for i, arch := range o.Architectures {
+		setCString(archs, i, arch)
+	}
+	arch := C.CString(o.Arch)
+	cachedir := C.CString(o.Cachedir)
+	defer func() {
+		C.free(unsafe.Pointer(arch))
+		C.free(unsafe.Pointer(cachedir))
+	}()
 	req := C.AptRequest{
-		op:            C.int(op),
-		flags:         flags(o),
-		ntargets:      C.int(n),
-		nignorepkgs:   C.int(len(o.IgnorePkgs)),
-		nignoregroups: C.int(len(o.IgnoreGroups)),
+		op:             C.int(op),
+		flags:          flags(o),
+		ntargets:       C.int(n),
+		nignorepkgs:    C.int(len(o.IgnorePkgs)),
+		nignoregroups:  C.int(len(o.IgnoreGroups)),
+		narchitectures: C.int(len(o.Architectures)),
+		arch:           arch,
+		cachedir:       cachedir,
 	}
 	if n > 0 {
 		req.names = names
@@ -177,6 +194,9 @@ func Resolve(op Op, targets []Target, o Options) (*Result, error) {
 	}
 	if len(o.IgnoreGroups) > 0 {
 		req.ignoregroups = igng
+	}
+	if len(o.Architectures) > 0 {
+		req.architectures = archs
 	}
 
 	var sess *C.AptSession

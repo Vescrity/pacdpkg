@@ -37,6 +37,10 @@ typedef struct {
    int nignorepkgs;
    const char **ignoregroups;
    int nignoregroups;
+   const char *arch;
+   const char *cachedir;
+   const char **architectures;
+   int narchitectures;
 } AptRequest;
 
 typedef struct {

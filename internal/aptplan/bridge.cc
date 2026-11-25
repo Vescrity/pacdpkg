@@ -327,6 +327,16 @@ bool openCache(AptSession *s, const AptRequest *req) {
    }
    bool lock = (req->flags & APT_FLAG_LOCK) != 0;
    _config->Set("APT::Ignore-Hold", (req->flags & APT_FLAG_OVERRIDE_HELD) != 0 ? "true" : "false");
+   if (req->arch != nullptr && req->arch[0] != '\0')
+      _config->Set("APT::Architecture", req->arch);
+   if (req->narchitectures > 0) {
+      _config->Clear("APT::Architectures");
+      for (int i = 0; i < req->narchitectures; ++i)
+         if (req->architectures[i] != nullptr && req->architectures[i][0] != '\0')
+            _config->Set("APT::Architectures::", req->architectures[i]);
+   }
+   if (req->cachedir != nullptr && req->cachedir[0] != '\0')
+      _config->Set("Dir::Cache::archives", req->cachedir);
    s->lock = lock;
    if (!s->CF->BuildCaches(nullptr, lock))
       return false;

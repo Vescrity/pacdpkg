@@ -103,11 +103,14 @@ func (a *App) upgrade() int {
 			ats = append(ats, aptplan.Target{Name: t.Name, Version: t.Version, Deb: t.DebPath})
 		}
 		res, err := aptplan.Resolve(aptplan.OpInstall, ats, aptplan.Options{
-			Needed:       a.cfg.Needed,
-			AsDeps:       a.cfg.AsDeps,
-			AsExplicit:   a.cfg.AsExplicit,
-			OverrideHeld: overrideHeld,
-			Lock:         !a.cfg.Print && !a.cfg.DownloadOnly,
+			Needed:        a.cfg.Needed,
+			AsDeps:        a.cfg.AsDeps,
+			AsExplicit:    a.cfg.AsExplicit,
+			OverrideHeld:  overrideHeld,
+			Lock:          !a.cfg.Print && !a.cfg.DownloadOnly,
+			Arch:          a.cfg.Arch,
+			Cachedir:      a.cfg.CacheDir,
+			Architectures: a.cfg.ArchList,
 		})
 		if err != nil {
 			Errorf("%v", err)

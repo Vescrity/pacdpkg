@@ -19,6 +19,7 @@ type Config struct {
 	SysRoot     string
 	SysRootSet  bool
 	Arch        string
+	ArchList    []string
 	CacheDir    string
 	CacheDirSet bool
 	ConfigFile  string
@@ -96,6 +97,7 @@ func (c *Config) Apply(d *OptDef, arg string, hasArg bool) error {
 		c.SysRootSet = true
 	case "arch":
 		c.Arch = arg
+		c.ArchList = append(c.ArchList, arg)
 	case "cachedir":
 		c.CacheDir = arg
 		c.CacheDirSet = true
