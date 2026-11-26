@@ -20,7 +20,7 @@ func (a *App) effectiveArch() string {
 
 func (a *App) effectiveArchitectures() []string {
 	if len(a.cfg.ArchList) == 0 {
-		return nil
+		return deb.Architectures()
 	}
 	out := make([]string, 0, len(a.cfg.ArchList))
 	for _, arch := range a.cfg.ArchList {

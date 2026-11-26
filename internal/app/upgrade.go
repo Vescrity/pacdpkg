@@ -42,6 +42,10 @@ func (a *App) upgrade() int {
 			continue
 		}
 		name, version := pf.Pkg.Name, pf.Pkg.Version
+		targetName := name
+		if pf.Pkg.Arch != "" && pf.Pkg.Arch != "all" {
+			targetName = name + ":" + pf.Pkg.Arch
+		}
 		if seen[name] {
 			Errorf("'%s': duplicate target", path)
 			ret = 1
@@ -76,9 +80,10 @@ func (a *App) upgrade() int {
 		}
 		seen[name] = true
 		targets = append(targets, deb.InstallTarget{
-			Name: name, Version: version, DebPath: path, Meta: pf.Pkg,
+			Name: targetName, Version: version, DebPath: path, Meta: pf.Pkg,
 		})
 		paths[name] = path
+		paths[targetName] = path
 	}
 
 	if ret != 0 {

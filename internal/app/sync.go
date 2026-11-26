@@ -49,7 +49,7 @@ func (a *App) sync() int {
 }
 
 func (a *App) loadSync() *deb.Sync {
-	s, err := deb.LoadSyncArch(a.effectiveArch())
+	s, err := deb.LoadSyncArches(a.effectiveArchitectures())
 	if err != nil {
 		Errorf("could not read the package lists: %v", err)
 		return nil

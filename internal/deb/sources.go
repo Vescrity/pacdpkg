@@ -76,6 +76,10 @@ func (r SourceRepo) listPrefix(arch string) string {
 // loadSourceRepos parses apt's sources and returns them keyed by the binary
 // index filename they describe.
 func loadSourceRepos(arch string) map[string]*SourceRepo {
+	return loadSourceReposArches([]string{arch})
+}
+
+func loadSourceReposArches(arches []string) map[string]*SourceRepo {
 	out := map[string]*SourceRepo{}
 	order := 0
 	for _, src := range loadSources() {
@@ -90,13 +94,21 @@ func loadSourceRepos(arch string) map[string]*SourceRepo {
 			default:
 				repo.Label = src.suite + "/" + comp
 			}
-			out[repo.listPrefix(arch)+"_Packages"] = &repo
+			for _, arch := range arches {
+				if arch != "" {
+					out[repo.listPrefix(arch)+"_Packages"] = &repo
+				}
+			}
 		}
 		if src.flat {
 			repo := SourceRepo{URI: src.uri, Suite: src.suite, Order: order}
 			order++
 			repo.Label = hostOf(src.uri)
-			out[repo.listPrefix(arch)+"_Packages"] = &repo
+			for _, arch := range arches {
+				if arch != "" {
+					out[repo.listPrefix(arch)+"_Packages"] = &repo
+				}
+			}
 		}
 	}
 	return out

@@ -160,7 +160,24 @@ pkgCache::PkgIterator findPkg(pkgCache &C, const std::string &name) {
       arch = n.substr(pos + 1);
       n = n.substr(0, pos);
    }
-   pkgCache::PkgIterator P = C.FindPkg(n, arch.empty() ? "any" : arch);
+   if (!arch.empty()) {
+      pkgCache::PkgIterator P = C.FindPkg(n, arch);
+      if (!P.end())
+         return P;
+   } else {
+      std::string native = _config->Find("APT::Architecture");
+      if (!native.empty()) {
+         pkgCache::PkgIterator P = C.FindPkg(n, native);
+         if (!P.end()) {
+            for (pkgCache::VerIterator V = P.VersionList(); !V.end(); ++V)
+               if (hasRepoFile(V))
+                  return P;
+            if (!P.CurrentVer().end())
+               return P;
+         }
+      }
+   }
+   pkgCache::PkgIterator P = C.FindPkg(n, "any");
    if (P.end())
       P = C.FindPkg(n);
    return P;
@@ -335,8 +352,13 @@ bool openCache(AptSession *s, const AptRequest *req) {
       if (!s->CF->GetSourceList()->AddVolatileFile(deb, nullptr))
          return false;
       const char *name = req->names[i];
-      if (name != nullptr)
+      if (name != nullptr) {
          s->localByPkg[name] = deb;
+         std::string bare = name;
+         auto pos = bare.find(':');
+         if (pos != std::string::npos)
+            s->localByPkg[bare.substr(0, pos)] = deb;
+      }
    }
    s->lock = lock;
    if (!s->CF->BuildCaches(nullptr, lock))

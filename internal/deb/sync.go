@@ -55,22 +55,41 @@ func LoadSync() (*Sync, error) {
 	return LoadSyncArch(NativeArch())
 }
 
-// LoadSyncArch parses every apt list for arch. Files may be plain text or
-// compressed; compressed ones are decompressed in-process.
+// LoadSyncArch parses every apt list for one architecture.
 func LoadSyncArch(arch string) (*Sync, error) {
+	return LoadSyncArches([]string{arch})
+}
+
+// LoadSyncArches parses the apt lists for every requested architecture.
+// Files may be plain text or compressed; compressed ones are decompressed
+// in-process.
+func LoadSyncArches(arches []string) (*Sync, error) {
 	entries, err := os.ReadDir(listDir)
 	if err != nil {
 		return nil, err
 	}
+	want := map[string]bool{}
+	for _, arch := range arches {
+		if arch != "" {
+			want[arch] = true
+		}
+	}
+	if len(want) == 0 {
+		want[NativeArch()] = true
+	}
+	archList := make([]string, 0, len(want))
+	for arch := range want {
+		archList = append(archList, arch)
+	}
 	s := &Sync{byName: map[string][]*SyncPkg{}}
-	repos := loadSourceRepos(arch)
+	repos := loadSourceReposArches(archList)
 	seen := map[string]bool{}
 	sort.SliceStable(entries, func(i, j int) bool {
 		return listOrder(entries[i].Name(), repos) < listOrder(entries[j].Name(), repos)
 	})
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !isPackagesList(name, arch) {
+		if e.IsDir() || !isPackagesList(name, want) {
 			continue
 		}
 		base := trimCompression(name)
@@ -106,9 +125,9 @@ func LoadSyncArch(arch string) (*Sync, error) {
 	return s, nil
 }
 
-func isPackagesList(name, arch string) bool {
+func isPackagesList(name string, arches map[string]bool) bool {
 	base := name
-	for _, suf := range []string{".lz4", ".gz", ".xz"} {
+	for _, suf := range []string{".lz4", ".gz", ".xz", ".zst", ".bz2"} {
 		base = strings.TrimSuffix(base, suf)
 	}
 	if !strings.HasSuffix(base, "_Packages") {
@@ -116,7 +135,7 @@ func isPackagesList(name, arch string) bool {
 	}
 	base = strings.TrimSuffix(base, "_Packages")
 	if i := strings.LastIndex(base, "_binary-"); i >= 0 {
-		return base[i+len("_binary-"):] == arch
+		return arches[base[i+len("_binary-"):]]
 	}
 	return true
 }

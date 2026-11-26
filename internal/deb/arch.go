@@ -18,6 +18,30 @@ func NativeArch() string {
 	return DebArch(runtime.GOARCH)
 }
 
+// Architectures returns all architectures dpkg knows about, native first.
+func Architectures() []string {
+	if archs := architecturesFromDpkgArch(dpkgArchFile); len(archs) > 0 {
+		return archs
+	}
+	return []string{DebArch(runtime.GOARCH)}
+}
+
+func architecturesFromDpkgArch(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(string(data), "\n") {
+		arch := strings.TrimSpace(line)
+		if arch == "" || arch == "all" {
+			continue
+		}
+		out = append(out, arch)
+	}
+	return out
+}
+
 func archFromDpkgArch(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
