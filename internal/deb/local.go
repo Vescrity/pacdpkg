@@ -77,9 +77,6 @@ func Open() (*DB, error) {
 		return nil, err
 	}
 	for _, p := range pkgs {
-		if _, exists := db.byName[p.Name]; exists {
-			p.Name = p.Binary
-		}
 		db.Pkgs = append(db.Pkgs, p)
 		db.byName[p.Name] = p
 	}
@@ -121,7 +118,17 @@ func (db *DB) EnsureReasons() {
 
 func (db *DB) Get(name string) *alpm.Pkg {
 	name = strings.TrimPrefix(name, "local/")
-	return db.byName[name]
+	if p := db.byName[name]; p != nil {
+		return p
+	}
+	if !strings.Contains(name, ":") {
+		for _, arch := range Architectures() {
+			if p := db.byName[name+":"+arch]; p != nil {
+				return p
+			}
+		}
+	}
+	return nil
 }
 
 // ReasonsKnown reports whether apt's install-reason state could be read.
@@ -138,7 +145,9 @@ func (db *DB) Held(name string) bool {
 func (db *DB) targets(dep alpm.Dep) []string {
 	var names []string
 	for _, alt := range dep.Alts {
-		names = append(names, alt.Name)
+		if p := db.Get(alt.Name); p != nil {
+			names = append(names, p.Name)
+		}
 		for _, p := range db.provided[alt.Name] {
 			names = append(names, p.Name)
 		}

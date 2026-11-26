@@ -98,6 +98,7 @@ func (a *App) syncTransaction() int {
 	}
 	enrichPlan(sync, db, res.Plan)
 	a.warnPlanChanges(res.Plan)
+	a.warnSkipped(res.Skipped)
 	if !a.confirmRemovals(res.Plan) {
 		aptplan.Close(res.Session)
 		return 1
@@ -167,6 +168,7 @@ func (a *App) syncUpgrade() int {
 	}
 	enrichPlan(sync, db, res.Plan)
 	a.warnPlanChanges(res.Plan)
+	a.warnSkipped(res.Skipped)
 	return a.commitPlan(res.Plan, txOpts{})
 }
 
@@ -651,6 +653,22 @@ func (a *App) warnPlanChanges(plan *deb.Plan) {
 		if p.OldVersion != "" && p.NewVersion != "" &&
 			alpm.CompareVersion(p.NewVersion, p.OldVersion) < 0 {
 			Warnf("downgrading package %s (%s => %s)", p.Name, p.OldVersion, p.NewVersion)
+		}
+	}
+}
+
+func (a *App) warnSkipped(skipped []aptplan.Skip) {
+	if a.cfg.Print || a.cfg.DownloadOnly {
+		return
+	}
+	for _, s := range skipped {
+		switch s.Reason {
+		case "needed":
+			Warnf("%s-%s is up to date -- skipping", s.Name, s.Old)
+		case "held":
+			Warnf("%s: ignoring package upgrade (held)", s.Name)
+		case "ignored":
+			Warnf("%s: ignoring package upgrade (%s => %s)", s.Name, s.Old, s.New)
 		}
 	}
 }

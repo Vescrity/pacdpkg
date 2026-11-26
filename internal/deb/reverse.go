@@ -46,7 +46,7 @@ func (db *DB) providesVersion(p *alpm.Pkg, name string) (string, bool) {
 // that is not in exclude; each alternative keeps its own constraint.
 func (db *DB) DepSatisfied(dep alpm.Dep, exclude map[string]bool) bool {
 	for _, alt := range dep.Alts {
-		if p := db.byName[alt.Name]; p != nil && !exclude[p.Name] &&
+		if p := db.Get(alt.Name); p != nil && !exclude[p.Name] &&
 			versionSatisfies(p.Version, alt.Op, alt.Version) {
 			return true
 		}

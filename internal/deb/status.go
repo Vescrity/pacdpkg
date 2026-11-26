@@ -126,6 +126,7 @@ func loadLocal() ([]*alpm.Pkg, error) {
 		}
 		qualified := st.fields["Multi-Arch"] == "same"
 		p.Binary = binaryName(p.Name, p.Arch, qualified)
+		p.Name = p.Binary
 		if info, err := os.Stat(infoPath(p.Binary, p.Name, ".list")); err == nil {
 			p.InstallDate = info.ModTime().Unix()
 		}

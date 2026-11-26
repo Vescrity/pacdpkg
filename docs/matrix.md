@@ -39,7 +39,7 @@
 | `--cachedir` / `--arch` / `--config` / `--noconfirm` / `--confirm` / `-v` | 已映射 | libapt 的 `Dir::Cache::archives`、`APT::Architecture`/`APT::Architectures` / pacdpkg.conf 方言 / 单布尔三态 / 配置横幅 |
 | `--color` / `-v` / 配置文件 | 已实现 | `--color always/never/auto`；只读取 `/etc/pacdpkg.conf`；`Color` 选项按 pacman 语义（仅在 tty 上生效），颜色码与 pacman 的 `enable_colors()` 完全一致 |
 | `--debug` / `--ask` / `--hookdir` / `--gpgdir` / `--logfile` | 仅校验/接受 | 无 hooks；apt 管理自身信任与日志 |
-| `-R` / `-Rs` / `-Rss` / `-Rn` / `-Rns` | 已实现（`-Rss` 有偏差） | libapt 标记删除；`-Rs` 只在目标的依赖闭包内用 `MarkAndSweep` 清理；`-Rss` 目前和 `-Rs` 相同，不会额外删除显式安装的依赖；`-Rn` 走 purge |
+| `-R` / `-Rs` / `-Rss` / `-Rn` / `-Rns` | 已实现 | libapt 标记删除；`-Rs` 只在目标的依赖闭包内用 `MarkAndSweep` 清理；`-Rss` 还会删除闭包内不再被外部需要的显式依赖；`-Rn` 走 purge |
 | `-Rc` / `-Ru` / `-Rd` | 已实现 | `-Rc` 按删除后仍被满足的依赖级联；`-Ru` 先过滤仍被需要的目标；`-Rdd` 仍走 `dpkg --force-depends` |
 | `-R` 依赖保护 | 已实现 | 删除会破坏未删除包的依赖时，按 pacman 拒绝事务并打印 `removing X breaks dependency ...` |
 | `-Rp` / `--print-format` | 已实现 | `name-version` / `%n %v %r %l`；`-n` + `-p` 按 pacman 报冲突 |

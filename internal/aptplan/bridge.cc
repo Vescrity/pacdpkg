@@ -30,11 +30,16 @@
 #include <set>
 #include <sstream>
 
+struct Skip {
+   std::string name, oldver, newver, reason;
+};
+
 struct AptSession {
    pkgCacheFile *CF = nullptr;
    pkgRecords *Recs = nullptr;
    bool lock = false;
    std::map<std::string, std::string> localByPkg;
+   std::vector<Skip> skipped;
 };
 
 namespace {
@@ -303,7 +308,8 @@ std::string actionJSON(const Action &a) {
 
 std::string makeResponse(const std::vector<Action> &actions,
                          const std::vector<std::string> &problems,
-                         const std::string &error) {
+                         const std::string &error,
+                         const std::vector<Skip> &skipped = {}) {
    std::ostringstream o;
    o << "{\"error\":" << jsonEscape(error) << ",\"problems\":[";
    for (size_t i = 0; i < problems.size(); ++i) {
@@ -316,6 +322,15 @@ std::string makeResponse(const std::vector<Action> &actions,
       if (i)
          o << ",";
       o << actionJSON(actions[i]);
+   }
+   o << "],\"skipped\":[";
+   for (size_t i = 0; i < skipped.size(); ++i) {
+      if (i)
+         o << ",";
+      o << "{\"name\":" << jsonEscape(skipped[i].name)
+        << ",\"old\":" << jsonEscape(skipped[i].oldver)
+        << ",\"new\":" << jsonEscape(skipped[i].newver)
+        << ",\"reason\":" << jsonEscape(skipped[i].reason) << "}";
    }
    o << "]}";
    return o.str();
@@ -404,8 +419,10 @@ bool doInstall(AptSession *s, const AptRequest *req, std::vector<std::string> &p
       D.SetCandidateVersion(V);
       if (!P.CurrentVer().end() &&
           _system->VS->CmpVersion(V.VerStr(), P.CurrentVer().VerStr()) == 0) {
-         if (needed)
+         if (needed) {
+            s->skipped.push_back({P.Name(), verStr(P.CurrentVer()), verStr(V), "needed"});
             continue;
+         }
          D.SetReInstall(P, true);
       }
       Fix.Clear(P);
@@ -491,8 +508,10 @@ bool doUpgrade(AptSession *s, const AptRequest *req, std::vector<std::string> &p
       D.SetCandidateVersion(V);
       if (!P.CurrentVer().end() &&
           _system->VS->CmpVersion(V.VerStr(), P.CurrentVer().VerStr()) == 0) {
-         if (needed)
+         if (needed) {
+            s->skipped.push_back({P.Name(), verStr(P.CurrentVer()), verStr(V), "needed"});
             continue;
+         }
          D.SetReInstall(P, true);
       }
       Fix.Clear(P);
@@ -507,17 +526,24 @@ bool doUpgrade(AptSession *s, const AptRequest *req, std::vector<std::string> &p
    for (pkgCache::PkgIterator P = C.PkgBegin(); !P.end(); ++P) {
       if (P.CurrentVer().end())
          continue;
-      if (P->SelectedState == pkgCache::State::Hold)
-         continue;
+      std::string name = P.Name();
       pkgCache::VerIterator V = D.GetCandidateVersion(P);
+      if (P->SelectedState == pkgCache::State::Hold) {
+         if (!isExplicitTarget(name, req))
+            s->skipped.push_back({name, verStr(P.CurrentVer()), verStr(V), "held"});
+         continue;
+      }
       if (V.end())
          continue;
-      std::string name = P.Name();
       if (!isExplicitTarget(name, req)) {
-         if (matchesPattern(name.c_str(), req->ignorepkgs, req->nignorepkgs))
+         if (matchesPattern(name.c_str(), req->ignorepkgs, req->nignorepkgs)) {
+            s->skipped.push_back({name, verStr(P.CurrentVer()), verStr(V), "ignored"});
             continue;
-         if (matchesPattern(V.Section(), req->ignoregroups, req->nignoregroups))
+         }
+         if (matchesPattern(V.Section(), req->ignoregroups, req->nignoregroups)) {
+            s->skipped.push_back({name, verStr(P.CurrentVer()), verStr(V), "ignored"});
             continue;
+         }
       }
       int c = _system->VS->CmpVersion(V.VerStr(), P.CurrentVer().VerStr());
       if (c > 0 || (allowDowngrade && c < 0)) {
@@ -546,6 +572,7 @@ bool doRemove(AptSession *s, const AptRequest *req, std::vector<std::string> &pr
    pkgDepCache &D = *s->CF->GetDepCache();
    bool purge = (req->flags & APT_FLAG_PURGE) != 0;
    bool recursive = (req->flags & APT_FLAG_RECURSIVE) != 0;
+   bool recursiveAll = (req->flags & APT_FLAG_RECURSIVE_ALL) != 0;
    bool cascade = (req->flags & APT_FLAG_CASCADE) != 0;
    bool forceDeps = (req->flags & APT_FLAG_FORCE_DEPS) != 0;
    std::map<std::string, bool> baseline;
@@ -597,9 +624,35 @@ bool doRemove(AptSession *s, const AptRequest *req, std::vector<std::string> &pr
          }
       }
       D.MarkAndSweep();
+      std::set<std::string> removalSet;
       for (pkgCache::PkgIterator P = C.PkgBegin(); !P.end(); ++P)
-         if (D[P].Garbage && closure.count(P.Name()) != 0 && !D[P].Delete())
+         if (D[P].Delete())
+            removalSet.insert(P.Name());
+      for (pkgCache::PkgIterator P = C.PkgBegin(); !P.end(); ++P)
+         if (D[P].Garbage && closure.count(P.Name()) != 0 && !D[P].Delete()) {
             D.MarkDelete(P, purge);
+            removalSet.insert(P.Name());
+         }
+      if (recursiveAll) {
+         for (pkgCache::PkgIterator P = C.PkgBegin(); !P.end(); ++P) {
+            if (P.CurrentVer().end() || D[P].Delete() || closure.count(P.Name()) == 0)
+               continue;
+            D.MarkDelete(P, purge);
+            bool needed = false;
+            for (pkgCache::PkgIterator Q = C.PkgBegin(); !Q.end(); ++Q) {
+               if (Q.CurrentVer().end() || removalSet.count(Q.Name()) != 0)
+                  continue;
+               if (D[Q].InstBroken()) {
+                  needed = true;
+                  break;
+               }
+            }
+            if (needed)
+               D.MarkKeep(P, false, true);
+            else
+               removalSet.insert(P.Name());
+         }
+      }
    }
    if (cascade) {
       for (int round = 0; round < 100; ++round) {
@@ -713,8 +766,10 @@ std::vector<Action> collectActions(AptSession *s) {
       auto it = s->localByPkg.find(a.name);
       if (it != s->localByPkg.end())
          a.deb = it->second;
-      if (a.kind == "remove" || a.kind == "purge")
+      if (a.kind == "remove" || a.kind == "purge") {
+         a.name = P.FullName(true);
          removalReason(C, D, P, a);
+      }
       out.push_back(a);
    }
    return out;
@@ -826,7 +881,7 @@ char *aptplan_resolve(const AptRequest *req, AptSession **session) {
    std::vector<Action> actions;
    if (ok)
       actions = collectActions(s);
-   char *json = dupJSON(makeResponse(actions, problems, err));
+   char *json = dupJSON(makeResponse(actions, problems, err, s->skipped));
    if (!ok || session == nullptr) {
       aptplan_close(s);
    } else {
@@ -1073,7 +1128,7 @@ char *aptplan_orphans(int ignore_optdeps) {
       D.MarkAndSweep(roots);
       for (pkgCache::PkgIterator P = C.PkgBegin(); !P.end(); ++P)
          if (!P.CurrentVer().end() && D[P].Garbage)
-            orphans.push_back(P.Name());
+            orphans.push_back(P.FullName(true));
    }
    _config->Set("APT::Install-Recommends", "false");
    _config->Set("APT::Install-Suggests", "false");

@@ -57,16 +57,32 @@ type Options struct {
 }
 
 // Result is a resolved plan plus the libapt session that can execute it.
+type Skip struct {
+	Name   string
+	Old    string
+	New    string
+	Reason string
+}
+
 type Result struct {
 	Plan     *deb.Plan
 	Problems []string
+	Skipped  []Skip
 	Session  uintptr
+}
+
+type wireSkip struct {
+	Name   string `json:"name"`
+	Old    string `json:"old"`
+	New    string `json:"new"`
+	Reason string `json:"reason"`
 }
 
 type wireResponse struct {
 	Error    string       `json:"error"`
 	Problems []string     `json:"problems"`
 	Actions  []wireAction `json:"actions"`
+	Skipped  []wireSkip   `json:"skipped"`
 }
 
 type wireAction struct {
@@ -98,6 +114,9 @@ func flags(o Options) C.uint {
 	}
 	if o.Recursive > 0 {
 		f |= C.APT_FLAG_RECURSIVE
+	}
+	if o.Recursive > 1 {
+		f |= C.APT_FLAG_RECURSIVE_ALL
 	}
 	if o.Cascade {
 		f |= C.APT_FLAG_CASCADE
@@ -229,6 +248,9 @@ func Resolve(op Op, targets []Target, o Options) (*Result, error) {
 	id := uintptr(nextSession.Add(1))
 	sessions.Store(id, sess)
 	out := &Result{Session: id}
+	for _, skip := range wire.Skipped {
+		out.Skipped = append(out.Skipped, Skip{Name: skip.Name, Old: skip.Old, New: skip.New, Reason: skip.Reason})
+	}
 	plan := &deb.Plan{Session: out.Session, Removals: map[string]deb.RemovalInfo{}}
 	for _, a := range wire.Actions {
 		switch a.Kind {
