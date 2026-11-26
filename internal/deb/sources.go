@@ -95,7 +95,7 @@ func loadSourceReposArches(arches []string) map[string]*SourceRepo {
 				repo.Label = src.suite + "/" + comp
 			}
 			for _, arch := range arches {
-				if arch != "" {
+				if arch != "" && sourceAllowsArch(src, arch) {
 					out[repo.listPrefix(arch)+"_Packages"] = &repo
 				}
 			}
@@ -105,7 +105,7 @@ func loadSourceReposArches(arches []string) map[string]*SourceRepo {
 			order++
 			repo.Label = hostOf(src.uri)
 			for _, arch := range arches {
-				if arch != "" {
+				if arch != "" && sourceAllowsArch(src, arch) {
 					out[repo.listPrefix(arch)+"_Packages"] = &repo
 				}
 			}
@@ -174,16 +174,27 @@ func parseOneLine(text string) []sourceEntry {
 			continue
 		}
 		i := 1
-		for i < len(fields) && strings.HasPrefix(fields[i], "[") {
-			for i < len(fields) && !strings.HasSuffix(fields[i], "]") {
+		var archList []string
+		if i < len(fields) && strings.HasPrefix(fields[i], "[") {
+			var opts []string
+			for i < len(fields) {
+				token := fields[i]
+				opts = append(opts, strings.Trim(token, "[]"))
 				i++
+				if strings.HasSuffix(token, "]") {
+					break
+				}
 			}
-			i++
+			for _, opt := range strings.Fields(strings.Join(opts, " ")) {
+				if value, ok := strings.CutPrefix(opt, "arch="); ok {
+					archList = append(archList, strings.Split(value, ",")...)
+				}
+			}
 		}
 		if i+1 >= len(fields) {
 			continue
 		}
-		entry := sourceEntry{uri: fields[i], suite: fields[i+1]}
+		entry := sourceEntry{uri: fields[i], suite: fields[i+1], archList: archList}
 		entry.flat = entry.suite == "./" || entry.suite == "." || entry.suite == "/"
 		if !entry.flat {
 			for _, comp := range fields[i+2:] {
@@ -220,9 +231,10 @@ func parseDeb822(text string) []sourceEntry {
 		uris := strings.Fields(cur["URIs"])
 		suites := strings.Fields(cur["Suites"])
 		comps := strings.Fields(cur["Components"])
+		archList := strings.Fields(cur["Architectures"])
 		for _, uri := range uris {
 			for _, suite := range suites {
-				e := sourceEntry{uri: uri, suite: suite, comps: comps}
+				e := sourceEntry{uri: uri, suite: suite, comps: comps, archList: archList}
 				e.flat = suite == "./" || suite == "." || suite == "/"
 				out = append(out, e)
 			}
@@ -254,4 +266,16 @@ func parseDeb822(text string) []sourceEntry {
 func hostOf(uri string) string {
 	uri = strings.TrimPrefix(strings.TrimPrefix(uri, "https://"), "http://")
 	return strings.TrimSuffix(uri, "/")
+}
+
+func sourceAllowsArch(src sourceEntry, arch string) bool {
+	if len(src.archList) == 0 {
+		return true
+	}
+	for _, allowed := range src.archList {
+		if allowed == "all" || allowed == arch {
+			return true
+		}
+	}
+	return false
 }

@@ -97,6 +97,8 @@ deb 的 ar/tar），压缩的仓库列表在进程内解压，不解析命令输
 - 不使用 apt 的 pin 和 phased updates：候选版本取仓库里的最高版本。
 - Recommends 和 Suggests 映射成 optdepends，`-Qdtt` 据此判断孤儿包。
 - `-Qc` 读 `/usr/share/doc/<pkg>/changelog.Debian.gz`，没有时提示 changelog 不可用。
+- `-Qkk` 只检查文件是否存在和 MD5；dpkg 不记录权限、属主、mtime 和 symlink 目标。
+- `-Fy`/`-F` 只取本机主架构的 Contents，多架构的文件反查不完整。
 - 查询用的仓库索引仍只加载本机架构，事务由 libapt 处理。
 
 ## 许可
