@@ -30,7 +30,7 @@
 | `-Sl` | 已实现 | 按仓库列出；仓库标签为 `<suite>/<component>`，flat 仓库取主机名；同一 (仓库, 包, 版本) 去重 |
 | `-Sg` / `-Sgg` | 已实现（近似） | 仍以 `Section` 当 group |
 | `-Sc` / `-Scc` | 已实现 | 自己清理 `/var/cache/apt/archives`：`-Sc` 保留所有已安装版本（pacman 的 KeepInstalled 语义），`-Scc` 清空 |
-| `-Sy` / `-Syy` | 已实现（有已知风险） | `-Syy` 先把旧 lists 移到 `/var/cache/pacdpkg/lists-backup`；中断时不会自动恢复。成功与否按备份文件名判断，源被删除或压缩格式变化时可能把成功刷新判为失败。 |
+| `-Sy` / `-Syy` | 已实现 | `apt-get update --error-on=any`；`-Syy` 先下载到 `/var/lib/apt/lists.new`，成功后整体 rename 替换，失败或中断保留旧 lists |
 | `-S` / `-Su` / `-Suu` | 已实现 | libapt 的 `pkgDepCache` / `pkgProblemResolver` 计算计划 → pacman 摘要 → 确认 → 同一份 depcache 走 `pkgPackageManager` 执行；`-Su <targets>` 同时做全系统升级和目标；`--needed`、`--asdeps`、`--asexplicit` 已映射 |
 | `-Sw` / `-Sp` / `--print-format` | 已实现 | `-Sw` 走 `--download-only` 并提示 `Proceed with download?`；`-Sp` 直接从计划与 sources 拼 URL（与 apt 的镜像选择、百分号转义一致），支持 `%n %v %r %s %a %l %f %d %p %u` |
 | `--dbonly` / `--noscriptlet` / `--assume-installed` / `--overwrite` | 明确拒绝 | deb 后端无等价语义（dpkg 只能全局覆盖，无法按路径限定），直接报错而不是静默降级 |

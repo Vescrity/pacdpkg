@@ -339,51 +339,94 @@ func (a *App) syncRefresh() int {
 		return 1
 	}
 	recoverLists()
-
-	backup := false
 	if a.cfg.Refresh > 1 {
-		backup, err = moveListsAside()
-		if err != nil {
-			Warnf("could not move the old package lists aside: %v", err)
-			if backup {
-				restoreLists()
-			}
-			unlockLists(lock)
+		defer unlockLists(lock)
+		if err := forcedRefresh(); err != nil {
+			Errorf("failed to synchronize all databases: %v", err)
 			return 1
 		}
+		return 0
 	}
 	unlockLists(lock)
 	lock = nil
 	defer func() { unlockLists(lock) }()
-
 	if err := runUpdate(); err != nil {
-		if l, lerr := lockLists(); lerr == nil {
-			lock = l
-		}
-		if backup {
-			restoreLists()
-		}
 		Errorf("failed to synchronize all databases: %v", err)
 		return 1
 	}
-	if lock, err = lockLists(); err != nil {
-		Errorf("could not get the package list lock: %v", err)
-		return 1
-	}
-	if broken := repositoriesWithoutIndex(a.effectiveArch()); len(broken) > 0 {
-		Errorf("failed to synchronize all databases (failed to retrieve some files)")
-		for _, repo := range broken {
-			Warnf("no package index for repository: %s", repo)
-		}
-		if backup {
-			restoreLists()
-		}
-		return 1
-	}
-	if backup {
-		os.RemoveAll(listsBackup)
-	}
 	return 0
+}
+
+const (
+	listsDir  = "/var/lib/apt/lists"
+	listsTemp = "/var/lib/apt/lists.new"
+	listsOld  = "/var/lib/apt/lists.old"
+)
+
+// forcedRefresh downloads a complete list set into a sibling directory and
+// replaces the live lists only after apt succeeds.
+func forcedRefresh() error {
+	if err := os.RemoveAll(listsTemp); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(listsTemp, 0o755); err != nil {
+		return err
+	}
+	if err := runUpdate("-o", "Dir::State::lists="+listsTemp); err != nil {
+		os.RemoveAll(listsTemp)
+		return err
+	}
+	if !hasPackages(listsTemp) {
+		os.RemoveAll(listsTemp)
+		return fmt.Errorf("no package index was downloaded")
+	}
+	return swapLists()
+}
+
+func swapLists() error {
+	if err := os.RemoveAll(listsOld); err != nil {
+		return err
+	}
+	if err := os.Rename(listsDir, listsOld); err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+	} else if err := os.Rename(listsTemp, listsDir); err != nil {
+		_ = os.Rename(listsOld, listsDir)
+		return err
+	}
+	if _, err := os.Stat(listsDir); err != nil {
+		if err := os.Rename(listsTemp, listsDir); err != nil {
+			return err
+		}
+	}
+	return os.RemoveAll(listsOld)
+}
+
+func hasPackages(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.Contains(e.Name(), "_Packages") {
+			return true
+		}
+	}
+	return false
+}
+
+// recoverLists repairs a swap interrupted between the two renames.
+func recoverLists() {
+	if _, err := os.Stat(listsDir); err != nil {
+		if _, err := os.Stat(listsOld); err == nil {
+			_ = os.Rename(listsOld, listsDir)
+		} else if _, err := os.Stat(listsTemp); err == nil {
+			_ = os.Rename(listsTemp, listsDir)
+		}
+	}
+	os.RemoveAll(listsOld)
+	os.RemoveAll(listsTemp)
 }
 
 // lockFile takes the same fcntl lock apt uses for a directory.
@@ -415,10 +458,12 @@ func lockLists() (*os.File, error) {
 
 func unlockLists(f *os.File) { unlockFile(f) }
 
-// runUpdate streams apt-get update and restores on SIGINT/SIGTERM so an
-// interrupted -Syy does not leave the lists directory empty.
-func runUpdate() error {
-	args := append(append([]string{}, deb.ExtraArgs...), "update")
+// runUpdate streams apt-get update. --error-on=any makes a partially failed
+// update return non-zero, so no filename guessing is needed.
+func runUpdate(extra ...string) error {
+	args := append([]string{}, deb.ExtraArgs...)
+	args = append(args, extra...)
+	args = append(args, "update", "--error-on=any")
 	cmd := exec.Command("apt-get", args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -439,125 +484,6 @@ func runUpdate() error {
 		<-done
 		return fmt.Errorf("interrupted")
 	}
-}
-
-// recoverLists restores a backup left by a killed -Syy before apt reads the
-// lists again.
-func recoverLists() {
-	entries, err := os.ReadDir(listsBackup)
-	if err != nil || len(entries) == 0 {
-		return
-	}
-	restoreLists()
-}
-
-// repositoriesWithoutIndex reports configured repositories that produced no
-// package index at all.
-func repositoriesWithoutIndex(arch string) []string {
-	var broken []string
-	for _, group := range deb.ExpectedListGroups(arch) {
-		found := false
-		for _, name := range group {
-			if indexExists(name) {
-				found = true
-				break
-			}
-		}
-		if !found && len(group) > 0 {
-			broken = append(broken, group[0])
-		}
-	}
-	return broken
-}
-
-const (
-	listsDir    = "/var/lib/apt/lists"
-	listsBackup = "/var/cache/pacdpkg/lists-backup"
-)
-
-// moveListsAside stashes the package lists so a forced refresh (-Syy) can be
-// rolled back when apt fails.
-func moveListsAside() (bool, error) { return moveListsFrom(listsDir, listsBackup) }
-
-func moveListsFrom(dir, backup string) (bool, error) {
-	// A leftover backup means a previous refresh was interrupted; recover it
-	// instead of discarding the only copy of the indexes.
-	if entries, err := os.ReadDir(backup); err == nil && len(entries) > 0 {
-		restoreListsFrom(dir, backup)
-	}
-	if err := os.RemoveAll(backup); err != nil {
-		return false, err
-	}
-	if err := os.MkdirAll(backup, 0o755); err != nil {
-		return false, err
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false, err
-	}
-	moved := false
-	for _, e := range entries {
-		name := e.Name()
-		if !strings.Contains(name, "_Packages") && !strings.Contains(name, "_Release") &&
-			!strings.Contains(name, "_InRelease") {
-			continue
-		}
-		if err := moveFile(filepath.Join(dir, name), filepath.Join(backup, name)); err != nil {
-			return moved, err
-		}
-		moved = true
-	}
-	if !moved {
-		os.RemoveAll(backup)
-	}
-	return moved, nil
-}
-
-func moveFile(src, dst string) error {
-	if err := os.Rename(src, dst); err == nil {
-		return nil
-	}
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(dst, data, 0o644); err != nil {
-		return err
-	}
-	return os.Remove(src)
-}
-
-func restoreLists() { restoreListsFrom(listsDir, listsBackup) }
-
-func restoreListsFrom(dir, backup string) {
-	entries, err := os.ReadDir(backup)
-	if err != nil {
-		return
-	}
-	keep := map[string]bool{}
-	for _, e := range entries {
-		keep[e.Name()] = true
-	}
-	if current, err := os.ReadDir(dir); err == nil {
-		for _, e := range current {
-			name := e.Name()
-			if keep[name] {
-				continue
-			}
-			if strings.Contains(name, "_Packages") || strings.Contains(name, "_Release") ||
-				strings.Contains(name, "_InRelease") {
-				os.Remove(filepath.Join(dir, name))
-			}
-		}
-	}
-	for _, e := range entries {
-		dst := filepath.Join(dir, e.Name())
-		os.Remove(dst)
-		if err := moveFile(filepath.Join(backup, e.Name()), dst); err != nil {
-			Warnf("could not restore %s: %v", e.Name(), err)
-		}
-	}
-	os.RemoveAll(backup)
 }
 
 func (a *App) syncClean() int {
@@ -672,15 +598,4 @@ func parseDebFileName(name string) (string, string, bool) {
 	version = strings.ReplaceAll(version, "%3a", ":")
 	version = strings.ReplaceAll(version, "%3A", ":")
 	return rest[:verSep], version, true
-}
-
-// indexExists reports whether an apt index was downloaded, with or without
-// compression.
-func indexExists(name string) bool {
-	for _, suf := range []string{"", ".lz4", ".gz", ".xz", ".zst", ".bz2"} {
-		if _, err := os.Stat(filepath.Join(listsDir, name+suf)); err == nil {
-			return true
-		}
-	}
-	return false
 }

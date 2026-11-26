@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -243,39 +242,4 @@ func parseDeb822(text string) []sourceEntry {
 func hostOf(uri string) string {
 	uri = strings.TrimPrefix(strings.TrimPrefix(uri, "https://"), "http://")
 	return strings.TrimSuffix(uri, "/")
-}
-
-// ExpectedListFiles returns the binary index filenames apt should have after
-// a successful update.
-func ExpectedListFiles(arch string) []string {
-	repos := loadSourceRepos(arch)
-	out := make([]string, 0, len(repos))
-	for name := range repos {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// ExpectedListGroups groups the expected index filenames by repository
-// (URI + suite). A repository only has to publish one of its components.
-func ExpectedListGroups(arch string) [][]string {
-	groups := map[string][]string{}
-	for _, src := range loadSources() {
-		key := src.uri + "|" + src.suite
-		for _, comp := range src.components() {
-			repo := SourceRepo{URI: src.uri, Suite: src.suite, Component: comp}
-			groups[key] = append(groups[key], repo.listPrefix(arch)+"_Packages")
-		}
-	}
-	keys := make([]string, 0, len(groups))
-	for key := range groups {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	out := make([][]string, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, groups[key])
-	}
-	return out
 }
